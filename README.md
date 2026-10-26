@@ -234,7 +234,8 @@ driver crates are still outstanding. AI assistance is available only with the
 optional `ai` Cargo feature and is not part of the default binary. F9/G9 were
 verified locally for PostgreSQL 16/17/18, MySQL 8.4, and MariaDB 10.11/11.4/11.8.
 G10 was verified locally using fake providers, but no real AI service was called;
-F11/G11 and the planned V1 are still incomplete. Do not
+F11/G11 and the planned V1 are still incomplete. Prepared hardening and
+release drafts are linked below; they are not release sign-off. Do not
 treat this release as the planned V1 or use it to migrate production databases.
 
 ## Optional AI proposals
@@ -404,6 +405,8 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features --locked
 cargo build --workspace --all-features --locked
+cargo run --example sqlite_embedded_migration --locked
+cargo run --example sqlite_schema_dsl --locked
 ```
 
 The default tests use temporary directories and real temporary SQLite files;
@@ -429,6 +432,16 @@ they use the same loopback variables, create randomized schema objects, execute
 the generated Up and explicit Down statements, and verify foreign-key, unique,
 and check constraints. The G6 run covered PostgreSQL 16/17/18, MySQL 8.4, and
 MariaDB 10.11/11.4/11.8.
+
+The current evidence and remaining platform gaps are summarized in the
+[provisional support matrix](docs/support-matrix.md). For metadata format
+upgrades, read the [upgrade guide](docs/upgrade-guide.md); for interrupted runs,
+read the [recovery drills](docs/recovery-drills.md). Dependency audit and SBOM
+commands and the fuzz harness are documented in
+[`docs/supply-chain.md`](docs/supply-chain.md). `F11/G11` remains pending until
+the audit, fuzz runs, full fault matrix, and CI results are reviewed. The
+[changelog](CHANGELOG.md) and [release checklist](docs/release-checklist.md) are
+drafts only; no release is approved or published.
 
 ## License
 

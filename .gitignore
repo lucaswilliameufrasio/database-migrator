@@ -2,3 +2,5 @@
 /dbm.sqlite
 /dbm.sqlite-shm
 /dbm.sqlite-wal
+/bom.json
+/fuzz/target/

@@ -1,0 +1,28 @@
+[package]
+name = "database-migrator-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+database-migrator = { path = "..", features = ["fuzzing-harness"] }
+
+[[bin]]
+name = "sql_scanner"
+path = "fuzz_targets/sql_scanner.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "migration_parser"
+path = "fuzz_targets/migration_parser.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

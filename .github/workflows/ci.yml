@@ -31,3 +31,41 @@ jobs:
 
       - name: Build
         run: cargo build --workspace --all-features --locked
+
+      - name: Run executable examples
+        run: |
+          cargo run --example sqlite_embedded_migration --locked
+          cargo run --example sqlite_schema_dsl --locked
+
+  supply-chain:
+    name: Audit dependencies and generate SBOM
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # Verified upstream release 2026-10-23:
+      # https://github.com/actions/checkout/releases/tag/v7.0.1
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal
+
+      - name: Install pinned dependency audit tools
+        run: |
+          cargo install --locked --version 0.22.2 cargo-audit
+          cargo install --locked --version 0.20.2 cargo-deny
+          cargo install --locked --version 0.5.9 cargo-cyclonedx
+
+      - name: Audit locked dependencies and generate CycloneDX SBOM
+        run: sh scripts/supply-chain.sh
+
+      - name: Upload CycloneDX SBOM
+        # Verified canonical upstream release 2026-10-26:
+        # https://github.com/actions/upload-artifact/releases/tag/v7.0.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: database-migrator-sbom-${{ github.sha }}
+          path: bom.json
+          if-no-files-found: error
+          retention-days: 30

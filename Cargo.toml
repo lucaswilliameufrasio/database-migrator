@@ -26,6 +26,7 @@ bench = false
 default = []
 ai = ["dep:reqwest"]
 test-runner-fixture = []
+fuzzing-harness = []
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }

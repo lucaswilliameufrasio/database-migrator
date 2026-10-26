@@ -1215,18 +1215,34 @@ schemas/prompt contracts, preview de contexto seguro, nenhuma chamada sem opt-in
 e nenhuma transição AI→apply têm cobertura automatizada e builds padrão/AI
 verificados. Isso não aprova G11 ou a V1.
 
-**F11 — parcial (2026-10-26; G11 pendente):** adicionado
-`scripts/bench-validate.sh` e capturado o baseline local acima. A suíte
-all-features e a regressão de runner também passaram. `cargo-fuzz`, `cargo-audit`,
-`cargo-deny` e `cargo-cyclonedx` não estão instalados; não foram executados fuzzing
-guiado, auditoria de dependências ou geração SBOM. A auditoria de segurança
-executável completa continua bloqueada pela ausência do sandbox isolado exigido;
-chaos/cenários de kill-disconnect e exemplos executáveis ainda não fecham a
-matriz. Portanto G11 não foi aprovado.
+**F11 — parcial (2026-10-26; G11 pendente):** o baseline local e os testes de
+falha anteriores permanecem registrados. Foram adicionados dois alvos libFuzzer
+(`sql_scanner` e `migration_parser`) com corpus inicial, wrappers internos sob a
+feature opt-in `fuzzing-harness`, dois exemplos executáveis, `deny.toml`, script
+de auditoria/SBOM e job de supply chain com ferramentas fixadas. O CI passou a
+executar os exemplos e a guardar SBOM CycloneDX como artefato temporário; esse
+job ainda não foi observado nesta execução. As versões upstream foram
+verificadas em 2026-10-26. No sandbox offline local faltam `cargo-fuzz`,
+`libfuzzer-sys`, `cargo-audit`, `cargo-deny`, `cargo-cyclonedx` e nightly; por
+isso não há evidência local de fuzz guiado, auditoria de dependências ou saída
+SBOM. A auditoria de segurança completa e a matriz de fault injection de 12
+cenários não foram concluídas; a resolução transitiva do pacote fuzz ainda não
+tem lockfile próprio auditado. A cobertura existente inclui kill durante
+transação SQLite, interrupção de processo MySQL não transacional e perda de
+sessão PostgreSQL, com testes de banco opt-in. Documentação de recuperação e
+artefatos draft de F12 foram preparados. G11 não foi aprovado.
 
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 
 **G12** — Tag estável com release notes, checksums assinados quando possível, binários homologados, changelog, upgrade guide, compatibilidade semver, matriz de testes publicada e exemplos de CI de deploy seguros.
+
+**Preparação F12 (2026-10-26; sem aprovação de G12):** rascunhos de changelog,
+guia de upgrade de metadata, matriz de suporte e checklist estão em
+`CHANGELOG.md`, `docs/upgrade-guide.md`, `docs/support-matrix.md` e
+`docs/release-checklist.md`. Nenhum binário multiplataforma foi homologado,
+nenhum artefato público foi publicado e nenhuma tag foi criada. G12 depende de
+G11, das decisões ainda provisórias de V1 e de autorização explícita para
+publicação.
 
 ---
 
