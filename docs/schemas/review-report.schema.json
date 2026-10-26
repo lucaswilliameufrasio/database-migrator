@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:database-migrator:schema:review-report:1.0",
+  "title": "Database Migrator AI ReviewReport",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "summary", "issues", "assumptions", "risk_explanations"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 8192 },
+    "issues": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "code", "message", "recommendation"],
+        "properties": {
+          "severity": { "enum": ["low", "medium", "high", "critical"] },
+          "code": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "file": { "type": ["string", "null"], "maxLength": 4096 },
+          "line": { "type": ["integer", "null"], "minimum": 0, "maximum": 4294967295 },
+          "message": { "type": "string", "minLength": 1, "maxLength": 8192 },
+          "recommendation": { "type": "string", "maxLength": 8192 }
+        }
+      }
+    },
+    "assumptions": { "$ref": "#/$defs/textList" },
+    "risk_explanations": { "$ref": "#/$defs/textList" }
+  },
+  "$defs": {
+    "textList": {
+      "type": "array",
+      "maxItems": 100,
+      "items": { "type": "string", "minLength": 1, "maxLength": 8192 }
+    }
+  }
+}

@@ -1039,6 +1039,20 @@ Versões adicionais podem entrar na matriz após validação real. O suporte dev
 - Meta de regressão: variação >20% em benchmark estável exige investigação antes do release, não reprovação cega de CI ruidoso.
 - Tamanho e cold-start de CLI minimal/full medidos por alvo e publicados; sem prometer binário específico em MB sem medição.
 
+**Baseline local inicial (2026-10-26; não é SLO nem comparação entre máquinas):**
+`cargo build --release --bin dbm --locked` e
+`sh scripts/bench-validate.sh target/release/dbm 1000 5`, com 1 warm-up e 5
+medições de parede para `validate` offline sobre 1.000 migrations SQL geradas:
+12, 11, 10, 10 e 11 ms (mediana 11 ms). Hardware/software: Intel Core
+i5-8265U, Linux x86_64 kernel 7.2.8, `rustc`/Cargo 1.99.1, perfil release.
+O harness confirmou que o relatório contou as 1.000 migrations e que nenhuma
+base SQLite foi criada. O valor inclui startup do processo; mede apenas
+descoberta/validação, não `plan`, drivers de rede, estado de metadata, concorrência
+nem comparação com Goose/SQLx. Não serve como prova do objetivo de 1 s em hardware
+de CI; repetir em hardware de referência e ampliar a matriz antes de usar como
+critério de release. O script usa `/tmp/opencode` por padrão; `DBM_BENCH_TMPDIR`
+pode selecionar outro diretório descartável.
+
 ### 16.3 Resiliência
 
 - Erros de rede antes de qualquer statement podem permitir retry apenas da **conexão** em operações read-only; nunca fazer retry cego do DDL depois de envio.
@@ -1059,14 +1073,23 @@ As fases abaixo são **incrementos internos**. Uma fase intermediária não é a
 | **F2 — SQL básico/SQLite** | parser SQL, planner, SQLite executor, meta DDL inicial, Up/Down | F1 | G2: SQL-only SQLite end-to-end e rollback |
 | **F3 — State/journal/recovery** | runs, steps, FSM, doctor read-only, reconciliation, locks SQLite | F2 | G3: fault injection não reaplica statement indeterminado |
 | **F4 — PostgreSQL** | driver, session lock, transações, no-transaction, introspecção | F3 | G4: suíte PG 16/17/18 e concorrência aprovadas |
-| **F5 — MySQL/MariaDB** | mysql_async, dialect capabilities, journal DDL, locks | F3 | G5: ambos servidores homologados, crash recovery aprovado |
-| **F6 — DSL Rust** | AST, compiladores por dialeto, escape hatch, migrations declarativas | F4/F5 | G6: mesmas operações testadas nos bancos aplicáveis |
+| **F5 — MySQL/MariaDB** | mysql_async, dialect capabilities, journal DDL, locks | F3 | G5 aprovado em 2026-10-24: matriz MySQL/MariaDB e crash recovery |
+| **F6 — DSL Rust** | AST, compiladores por dialeto, escape hatch, migrations declarativas | F4/F5 | G6 aprovado em 2026-10-24: operações básicas nas quatro famílias |
 | **F7 — Runner/embedded** | registry, protocolo CLI-runner, source embedded, Rust custom | F6 | G7: plano misto inteiro executado num runner; sem interpretador |
 | **F8 — Importação legada** | Knex/Goose/SQLx inspect/plan/import/verify/adopt | F3/F4/F5 | G8: fixtures reais, provenance, rollback bloqueado |
 | **F9 — Produto CLI/Repeatables** | comandos completos, config, JSON, batches, repeatables, namespaces | F7/F8 | G9: contratos CLI/JSON estáveis, CI não interativa |
 | **F10 — IA opcional** | BYOK, generate/review/explain, schemas, contexto seguro | F9 | G10: nenhum caminho AI→auto-apply; geração validável |
 | **F11 — Hardening** | security review, fuzz, chaos, performance, docs, exemplos, supply chain | todas | G11: matriz inteira verde, sem issues críticas abertas |
 | **F12 — V1 estável** | releases multiplataforma, changelog, migração de metadata, suporte | F11 | G12: checklist final completo e rollback/doctor demonstrados |
+
+**Status de execução (2026-10-26):** F4/G4 foi aprovado após a matriz PostgreSQL
+16/17/18, TLS, PgBouncer adversarial e jornada CLI. F5/G5 foi aprovado após a
+matriz MySQL 8.4 e MariaDB 10.11/11.4/11.8, com falha, deadlock, lock e
+recuperação explícita. F6/G6 e F7/G7 foram aprovados após compilação/execução da
+DSL e do runner. F8/G8, F9/G9 e F10/G10 foram verificados localmente conforme a
+evidência abaixo. F11 está parcial, G11 não foi aprovado e F12/G12 continuam
+bloqueados. Nenhum desses
+marcos intermediários conclui ou autoriza anunciar a V1.
 
 **Estimativa de planejamento, não promessa de prazo:** a V1 tem escopo equivalente a vários projetos médios. Para um engenheiro Rust experiente em dedicação integral, reservar aproximadamente **24–36+ semanas** como faixa de planejamento, com maior incerteza em parsing por dialeto, compatibilidade MySQL/MariaDB, importação legada e testes de falhas. Mais contribuintes não reduzem linearmente o tempo de integração. Fazer PoCs verticais de F2/F3/F5 nas primeiras semanas para calibrar esta estimativa.
 
@@ -1080,19 +1103,126 @@ As fases abaixo são **incrementos internos**. Uma fase intermediária não é a
 
 **G3** — Jornal executando antes/depois de statements, sem retry cego; `doctor` apresenta evidências; concorrência/queda reproduzível; recovery fecha estado apenas quando demonstrável.
 
-**G4** — Advisory lock pinned; atomicidade de state+DDL em migração transacional; `CREATE INDEX CONCURRENTLY` explicitamente fora de txn; PG pooling hostil bloqueado.
+**G4 — aprovado em 2026-10-24** — Advisory lock pinned; atomicidade de
+state+DDL em migração transacional; `CREATE INDEX CONCURRENTLY` explicitamente
+fora de txn com journal/reconciliação de catálogo; PostgreSQL 16/17/18; TLS com
+CA confiável e rejeição sem CA; PgBouncer 1.26.1-p0 em transaction pooling
+hostil bloqueado; CLI `plan/up/doctor/down/history` executada em cada versão.
 
-**G5** — MySQL 8.4 e MariaDB LTS separados; `GET_LOCK` <=64 chars; DDL implicit-commit; falha no segundo de três steps; descontinuidade de conexão; liberação/deadlock de locks testados.
+**G5 — aprovado em 2026-10-24** — MySQL 8.4 e MariaDB 10.11.14, 11.4.13
+e 11.8.2 homologados separadamente. A jornada CLI verificou `GET_LOCK` com
+nome de até 64 caracteres, concorrência, liberação explícita e no retorno da
+CLI, deadlock InnoDB sem perder o lock de sessão, DDL com commit implícito,
+falha no segundo e no terceiro de três steps, interrupção durante SQL, liberação
+do lock após perda da sessão e reconciliação manual aprovada sem retry cego.
+TLS com CA confiável e hostname divergente foi verificado em MySQL 8.4 e
+MariaDB 10.11.14. Execuções locais usaram instâncias descartáveis em loopback;
+isso não declara suporte a outras versões nem autoriza uso em produção.
 
-**G6** — DSL forte, AST imutável, dialect compiler com capability error; schema operações básicas nos 4 bancos quando compatíveis; down declarado.
+**G6 — aprovado em 2026-10-24** — AST declarativa selada e builders validados;
+Up/Down não vazios e declarados separadamente; compilação offline determinística
+para SQLite, PostgreSQL, MySQL e MariaDB; fingerprints versionados de AST e SQL;
+erro fail-closed para tipos/ações sem semântica suportada; escape hatch limitado a
+statement único com dialect, classe de segurança e shape de retorno explícitos.
+`CREATE TABLE`/`DROP TABLE`, PK, UNIQUE, CHECK, FK e índices foram compilados e
+executados com validação de constraints em SQLite, PostgreSQL 16/17/18, MySQL
+8.4 e MariaDB 10.11.14/11.4.13/11.8.2, usando somente instâncias descartáveis
+em loopback. No fechamento de G6, a DSL ainda era compile-only; registro e
+execução foram concluídos em F7/G7 abaixo.
 
-**G7** — Código Rust executável **somente** via runner compilado/embedded; CLI exige runner para planos mistos; hash/plano compatível, sem execução parcial se runner indisponível.
+**G7 — aprovado em 2026-10-24** — Registry reúne SQL embedded, DSL e migrations Rust
+com SQL de filesystem no mesmo plano e na mesma execução/journal. CLI delega ao
+runner explicitamente configurado; handshake JSON Lines valida versões,
+capabilities e fingerprints do runner binário, manifest, plano e destino antes
+de mutações. Runner ausente, incompatível, em timeout ou com framing/fingerprint
+inválido falha sem fallback ou SQL parcial. A jornada SQLite verificou
+validate/plan/status/history/doctor, Up/Down mistos e journal dos callbacks Rust;
+testes cobrem fonte embedded sem arquivo implantado, identidade/checksum
+determinísticos e rejeição de fingerprints divergentes. `doctor reconcile` em
+modo runner continua fail-closed. Rust executável é código nativo confiável,
+não sandbox; migrations Rust ainda exigem transação. Evidência local: format,
+Clippy, build e `cargo test --workspace --all-features --locked` passaram em
+2026-10-24: 98 testes aprovados, 17 opt-in ignorados, sem falhas. Isso aprova
+G7, não conclui a V1.
 
-**G8** — Importação Knex preserva filename/batch; Goose calcula estado de eventos, inclusive versão zero; SQLx preserva checksum algoritmo e status falho; cutover não executa legado, legacy Down bloqueado.
+**F8/G8 aprovados localmente (2026-10-25)** — `dbm import
+inspect/plan/apply/verify/adopt` suporta SQLite, PostgreSQL, MySQL e MariaDB
+para os formatos convencionais Knex, Goose e SQLx. `apply` exige `--yes` e o
+digest exato do plano, adquire o lock nativo da instalação, relê o histórico no
+mesmo alvo e registra estado corrente, timeline e proveniência sem executar SQL
+legado nem alterar tabelas da ferramenta anterior; import concorrente e repetido
+é idempotente. `verify` compara origem, eventos, estado corrente e digests.
+`adopt` exige verificação atual, migration nativa reversível já aplicada,
+evidência externa, ator, motivo e aprovação; Down permanece bloqueado enquanto
+existir migration legada corrente não adotada. Metadata v4 relacional e upgrades
+explícitos v1/v2/v3→v4 permanecem obrigatórios, sem upgrade automático em leitura
+ou planejamento.
+
+**Evidência G8:** testes reais e isolados em PostgreSQL 16, MySQL 8.4 e MariaDB
+11.4.13. Testes de conformidade por adapter leem e persistem fixtures Knex,
+Goose e SQLx, preservando filename/batch, sentinela Goose versão zero, checksum
+SHA-384 e estado falho SQLx; Knex ativo bloqueia o cutover. Jornadas CLI opt-in
+PostgreSQL/Goose, MySQL/Knex e MariaDB/SQLx passaram por inspect/plan, aplicação
+concorrente e repetida, detecção/restauração de drift, prova de que inspect/plan
+não inicializam metadata e de que import apply não executa migration nativa,
+verify, bloqueio de Down antes de adoção, adoção auditada e Down depois da
+adoção. As regressões SQLite também passaram. Isso aprova G8 somente para essa
+evidência; não amplia a matriz de versões homologadas nem autoriza cutover em
+produção.
+
+**G8 — aprovado localmente em 2026-10-25** — provenance e histórico dos três
+formatos preservados; import real não executa SQL legado; SQLx falho e lock
+Knex ativo falham fechados; drift, concorrência, idempotência e bloqueio de
+rollback foram verificados nos adapters de rede testados, com adoção explícita
+demonstrada.
 
 **G9** — Repeatables por checksum + audit; múltiplas fontes e namespaces; todos os comandos críticos JSON/exit code; production policy e target fingerprint.
 
-**G10** — Providers substituíveis, BYOK, prompts/response schemas, safe context preview, no external network sem opt-in, sem auto-apply.
+**F9 concluída; G9 verificado localmente (2026-10-26):** metadata v5, repeatables
+com estado corrente por checksum e runs auditados, exclusão do `down`, ordenação
+por fonte/nome, filtro de namespace e propagação do override CLI pelo handshake
+do runner. A suíte all-features passou (112 testes unitários e 24 de
+integração/CLI; 24 testes opt-in ignorados). Os testes SQLite cobrem repeatables,
+JSON/exit codes, política de produção e fingerprints. Novos testes reais
+PostgreSQL 16.15/17.11/18.6, MySQL 8.4.11 e MariaDB 10.11.14/11.4.13/11.8.2
+percorreram upgrade v3→v5 e downgrade controlado para fixture v4 seguido de
+upgrade v4→v5, confirmando metadata v5 e preservação da migration aplicada e do
+journal (runs/steps). Nos adapters MySQL e MariaDB, o preview permaneceu
+read-only e a mutação exigiu aprovação explícita. Isso verifica G9 na matriz
+suportada declarada; não amplia suporte a outras versões, não autoriza alterações
+em produção e não conclui a V1.
+
+**F10 concluída; G10 verificado localmente (2026-10-26):** feature Cargo `ai`
+opcional, provider OpenAI-compatible via `reqwest` e API pública `AiProvider`
+substituível. Profiles guardam endpoint/modelo/limites e apenas a referência da
+variável de ambiente do segredo; AI continua desabilitada por padrão. Os comandos
+explícitos `generate`, `review`, `explain` e `suggest-down` validam respostas
+estritas e schemas públicos, aplicam redaction e limites de contexto, validam SQL
+localmente e não escrevem arquivos, conectam ao banco ou aplicam propostas.
+`--preview-context` não resolve segredo nem chama provider. Testes cobrem provider
+injetado e HTTP local falso, rejeição sem opt-in, respostas/erros limitados e
+redigidos, fronteiras de path/symlink, schemas, os quatro contratos CLI e ausência
+de escrita/auto-apply. `cargo fmt --all -- --check`, `cargo check --workspace
+--all-targets --all-features --locked`, Clippy com `-D warnings`, builds padrão,
+`ai` e `all-features`, e `cargo test --workspace --all-features --locked`
+passaram: 112 testes unitários e 24 de integração/CLI; doc-tests: 0. Outros 24
+testes opt-in foram ignorados por exigirem bancos descartáveis. Não foram chamados providers reais;
+G10 comprova os limites locais do contrato, não a qualidade/segurança de qualquer
+serviço remoto.
+
+**G10 — verificado localmente:** BYOK por referência, provider substituível,
+schemas/prompt contracts, preview de contexto seguro, nenhuma chamada sem opt-in
+e nenhuma transição AI→apply têm cobertura automatizada e builds padrão/AI
+verificados. Isso não aprova G11 ou a V1.
+
+**F11 — parcial (2026-10-26; G11 pendente):** adicionado
+`scripts/bench-validate.sh` e capturado o baseline local acima. A suíte
+all-features e a regressão de runner também passaram. `cargo-fuzz`, `cargo-audit`,
+`cargo-deny` e `cargo-cyclonedx` não estão instalados; não foram executados fuzzing
+guiado, auditoria de dependências ou geração SBOM. A auditoria de segurança
+executável completa continua bloqueada pela ausência do sandbox isolado exigido;
+chaos/cenários de kill-disconnect e exemplos executáveis ainda não fecham a
+matriz. Portanto G11 não foi aprovado.
 
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 

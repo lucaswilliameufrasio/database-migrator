@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:database-migrator:schema:suggested-down-report:1.0",
+  "title": "Database Migrator AI SuggestedDownReport",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "migration", "down_sql", "rationale", "uncertainties", "risk_explanations"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "migration": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "down_sql": { "type": "string", "minLength": 1, "maxLength": 262144 },
+    "rationale": { "type": "string", "minLength": 1, "maxLength": 8192 },
+    "uncertainties": { "$ref": "#/$defs/textList" },
+    "risk_explanations": { "$ref": "#/$defs/textList" }
+  },
+  "$defs": {
+    "textList": {
+      "type": "array",
+      "maxItems": 100,
+      "items": { "type": "string", "minLength": 1, "maxLength": 8192 }
+    }
+  }
+}

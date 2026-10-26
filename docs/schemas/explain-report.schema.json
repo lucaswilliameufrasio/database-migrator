@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:database-migrator:schema:explain-report:1.0",
+  "title": "Database Migrator AI ExplainReport",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "summary", "steps", "assumptions", "cautions"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 8192 },
+    "steps": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["operation", "explanation", "risk"],
+        "properties": {
+          "operation": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "explanation": { "type": "string", "minLength": 1, "maxLength": 8192 },
+          "risk": { "type": "string", "maxLength": 8192 }
+        }
+      }
+    },
+    "assumptions": { "$ref": "#/$defs/textList" },
+    "cautions": { "$ref": "#/$defs/textList" }
+  },
+  "$defs": {
+    "textList": {
+      "type": "array",
+      "maxItems": 100,
+      "items": { "type": "string", "minLength": 1, "maxLength": 8192 }
+    }
+  }
+}

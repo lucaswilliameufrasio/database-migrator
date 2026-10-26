@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:database-migrator:schema:migration-proposal:1.0",
+  "title": "Database Migrator AI MigrationProposal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "proposal_id",
+    "requested_change",
+    "dialect",
+    "capabilities_snapshot",
+    "files",
+    "expected_schema_changes",
+    "suggested_down",
+    "uncertainties",
+    "risk_explanations"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "proposal_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "requested_change": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "dialect": { "enum": ["sqlite", "postgres", "mysql"] },
+    "capabilities_snapshot": { "type": "object" },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "content", "type"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 255,
+            "pattern": "^[^./\\\\][^/\\\\]*\\.sql$"
+          },
+          "content": { "type": "string", "minLength": 1, "maxLength": 262144 },
+          "type": { "const": "sql" }
+        }
+      }
+    },
+    "expected_schema_changes": { "$ref": "#/$defs/textList" },
+    "suggested_down": { "$ref": "#/$defs/textList" },
+    "uncertainties": { "$ref": "#/$defs/textList" },
+    "risk_explanations": { "$ref": "#/$defs/textList" },
+    "provider_metadata_redacted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model"],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "model": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    }
+  },
+  "$defs": {
+    "textList": {
+      "type": "array",
+      "maxItems": 100,
+      "items": { "type": "string", "minLength": 1, "maxLength": 8192 }
+    }
+  }
+}

@@ -1,0 +1,56 @@
+[package]
+name = "database-migrator"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+description = "A safe SQL migration engine and CLI for SQLite, PostgreSQL, MySQL, and MariaDB"
+readme = "README.md"
+
+[lib]
+name = "database_migrator"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dbm"
+path = "src/main.rs"
+
+[[bin]]
+name = "dbm-test-runner"
+path = "tests/fixtures/dbm-test-runner.rs"
+required-features = ["test-runner-fixture"]
+test = false
+bench = false
+
+[features]
+default = []
+ai = ["dep:reqwest"]
+test-runner-fixture = []
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+mysql_async = { version = "0.37.1", default-features = false, features = ["default-rustls-ring"] }
+rusqlite = { version = "0.40.2", features = ["bundled", "hooks"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"], optional = true }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+thiserror = "2.0.21"
+time = { version = "0.3.55", features = ["formatting", "parsing"] }
+rustls = { version = "0.23.0", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pemfile = "2.2.0"
+tokio = { version = "1.51.0", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio-postgres = "0.7.18"
+tokio-postgres-rustls = { version = "0.14.0", features = ["ring"] }
+toml = "1.1.8"
+uuid = { version = "1.29.0", features = ["v4"] }
+webpki-roots = "1.0.3"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
