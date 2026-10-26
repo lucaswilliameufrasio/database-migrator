@@ -1225,8 +1225,14 @@ job ainda não foi observado nesta execução. As versões upstream foram
 verificadas em 2026-10-26. No sandbox offline local faltam `cargo-fuzz`,
 `libfuzzer-sys`, `cargo-audit`, `cargo-deny`, `cargo-cyclonedx` e nightly; por
 isso não há evidência local de fuzz guiado, auditoria de dependências ou saída
-SBOM. A auditoria de segurança completa e a matriz de fault injection de 12
-cenários não foram concluídas; a resolução transitiva do pacote fuzz ainda não
+SBOM. Em 2026-10-26 foi feita uma revisão de segurança source-only do repositório
+no commit `9a8dd95c3143fe9adc59f1c51fba820ad05db129`: 20 unidades foram mapeadas,
+13 encerradas por revisão de fonte, quatro fingerprints únicos continuam
+`needs_validation`, dois candidatos foram rejeitados e uma unidade de supply
+chain ficou bloqueada. Nenhum candidato foi confirmado. A revisão não executou
+código-alvo por falta de sandbox completo e não equivale à auditoria completa nem
+a uma declaração de ausência de issues críticas. A matriz de fault injection de
+12 cenários não foi concluída; a resolução transitiva do pacote fuzz ainda não
 tem lockfile próprio auditado. A cobertura existente inclui kill durante
 transação SQLite, interrupção de processo MySQL não transacional e perda de
 sessão PostgreSQL, com testes de banco opt-in. Documentação de recuperação e

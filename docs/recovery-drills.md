@@ -45,7 +45,7 @@ section 13.3. Current source evidence is narrower than the complete matrix:
 | MySQL/MariaDB failures after earlier DDL steps | The non-transactional CLI journeys inject failures at the second and third statement and inspect partial effects before reconciliation | Opt-in; requires disposable loopback MySQL/MariaDB |
 | PostgreSQL migration-session loss during transactional DDL | `src/engine.rs::tests::local_postgres_session_loss_during_fsm_ddl_is_not_retried` terminates the backend while a scoped DDL trigger pauses execution and inspects durable state | Opt-in; requires disposable loopback PostgreSQL |
 | Runner absent, incompatible, timed out, or emitting extra frames | `tests/runner_protocol.rs::missing_runner_timeout_and_extra_frames_fail_without_partial_sql` and adjacent handshake tests | Covered locally; timeout test uses a disposable project |
-| All twelve crash boundaries, shared-schema namespace races, every metadata bootstrap/upgrade boundary, and rollback crash windows | No complete, repeatable matrix is currently recorded | Pending; G11 is not approved |
+| All twelve crash boundaries, shared-schema namespace races, every metadata bootstrap/upgrade boundary, and rollback crash windows | No complete, repeatable matrix is currently recorded. The repository-wide source-only security review on 2026-10-26 did not execute target code or add fault-injection evidence. | Pending; G11 is not approved |
 
 The opt-in database tests are ignored by default. Use only the test variables
 and disposable loopback database instances documented in the README; never run

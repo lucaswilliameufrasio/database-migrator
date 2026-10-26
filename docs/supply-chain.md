@@ -89,9 +89,16 @@ coverage evidence and does not close G11.
 
 ## Security review status
 
-No complete source security audit has been performed for this repository. The
-dependency checks above are not a substitute for reviewing trust boundaries,
-credential handling, file/path boundaries, database adapters, runner execution,
-or AI proposal handling. Do not infer “no critical issues” from a green
-dependency scan; G11 remains pending until the required review and validation
-are recorded.
+A repository-wide source-only security review was performed on 2026-10-26 at
+commit `9a8dd95c3143fe9adc59f1c51fba820ad05db129`. It mapped 20 units: 13 were
+source-covered, six candidate-linked units represent four unique
+`needs_validation` records, and one supply-chain unit is blocked. Two other
+hypotheses were rejected; no candidate was confirmed. The complete report and
+structured records are maintained outside this repository. This was not a
+complete validated audit: target code was not run because aggregate sandbox
+limits and safe evidence promotion were unavailable. The dependency checks
+above are not a substitute for reviewing trust boundaries, credential handling,
+file/path boundaries, database adapters, runner execution, or AI proposal
+handling. Do not infer “no critical issues” from this review or a green
+dependency scan. G11 remains pending until the unresolved validation, fuzzing,
+dependency, SBOM, and required failure-matrix evidence is recorded.

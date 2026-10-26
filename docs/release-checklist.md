@@ -5,6 +5,11 @@ publishing a package, uploading release assets, or running database migrations.
 
 ## Current gate status
 
+- A repository-wide source-only security review was recorded on 2026-10-26 at
+  commit `9a8dd95c3143fe9adc59f1c51fba820ad05db129`: four unique candidates
+  remain `needs_validation`, two hypotheses were rejected, one supply-chain
+  unit is blocked, and no candidate was confirmed. No target code was run; this
+  is not a “no critical issues” claim and does not satisfy G11.
 - [x] Draft changelog, upgrade guide, support matrix, and release checklist
       prepared.
 - [x] CI configuration for dependency audit and ephemeral CycloneDX SBOM
