@@ -1,9 +1,11 @@
+use std::io::Read;
 use std::net::IpAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use rustls::RootCertStore;
+use rustls::pki_types::pem::PemObject;
 use sha2::{Digest, Sha256};
 use tokio::task::JoinHandle;
 use tokio_postgres::config::{Host, SslMode};
@@ -2727,15 +2729,7 @@ async fn make_tls_connector(ca_cert_environment_name: Option<&str>) -> Result<Ma
         let certificates = run_blocking(move || {
             let file = std::fs::File::open(&path)
                 .map_err(|_| driver_error("could not read the configured PostgreSQL CA file"))?;
-            let certificates = rustls_pemfile::certs(&mut std::io::BufReader::new(file))
-                .collect::<std::result::Result<Vec<_>, _>>()
-                .map_err(|_| driver_error("configured PostgreSQL CA file is not valid PEM"))?;
-            if certificates.is_empty() {
-                return Err(driver_error(
-                    "configured PostgreSQL CA file contains no certificates",
-                ));
-            }
-            Ok(certificates)
+            parse_ca_certificates(file)
         })
         .await?;
         for certificate in certificates {
@@ -2751,6 +2745,20 @@ async fn make_tls_connector(ca_cert_environment_name: Option<&str>) -> Result<Ma
         .with_root_certificates(roots)
         .with_no_client_auth();
     Ok(MakeRustlsConnect::new(tls_config))
+}
+
+fn parse_ca_certificates(
+    reader: impl Read,
+) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>> {
+    let certificates = rustls::pki_types::CertificateDer::pem_reader_iter(reader)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|_| driver_error("configured PostgreSQL CA file is not valid PEM"))?;
+    if certificates.is_empty() {
+        return Err(driver_error(
+            "configured PostgreSQL CA file contains no certificates",
+        ));
+    }
+    Ok(certificates)
 }
 
 fn driver_error(message: &str) -> DbmError {
@@ -2776,12 +2784,14 @@ fn legacy_row_error(tool: &str, field: &str) -> DbmError {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io::Cursor;
     use std::time::Duration;
 
     use tokio_postgres::config::Config as PostgresConfig;
 
     use super::{
-        PostgresAdapter, advisory_lock_key, all_hosts_are_local, prepare_connection_config,
+        PostgresAdapter, advisory_lock_key, all_hosts_are_local, parse_ca_certificates,
+        prepare_connection_config,
     };
     use crate::config::{self, Environment};
     use crate::database::{DatabaseAdapter, DatabaseSession, SessionIntent};
@@ -2793,6 +2803,54 @@ mod tests {
     };
     use crate::storage::{FinishedRunData, LockData, PlannedRunData, StepData};
     use tokio_postgres::config::SslMode;
+
+    #[test]
+    fn parses_all_ca_certificates_and_ignores_other_pem_sections() {
+        let pem = concat!(
+            "-----BEGIN PRIVATE KEY-----\nAQID\n-----END PRIVATE KEY-----\n",
+            "-----BEGIN CERTIFICATE-----\nAQID\n-----END CERTIFICATE-----\n",
+            "-----BEGIN CERTIFICATE-----\nBAUG\n-----END CERTIFICATE-----\n",
+        );
+
+        let certificates = parse_ca_certificates(Cursor::new(pem))
+            .expect("parse every certificate and ignore non-certificate PEM sections");
+
+        assert_eq!(certificates.len(), 2);
+        assert_eq!(certificates[0].as_ref(), &[1, 2, 3]);
+        assert_eq!(certificates[1].as_ref(), &[4, 5, 6]);
+    }
+
+    #[test]
+    fn rejects_ca_pem_without_certificates() {
+        let pem = "-----BEGIN PRIVATE KEY-----\nAQID\n-----END PRIVATE KEY-----\n";
+
+        let error = parse_ca_certificates(Cursor::new(pem))
+            .expect_err("a CA file without certificates must be rejected");
+
+        assert!(matches!(
+            error,
+            DbmError::Driver {
+                driver: "PostgreSQL",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn rejects_malformed_ca_pem() {
+        let pem = "-----BEGIN CERTIFICATE-----\nnot-base64!\n-----END CERTIFICATE-----\n";
+
+        let error = parse_ca_certificates(Cursor::new(pem))
+            .expect_err("malformed certificate PEM must be rejected");
+
+        assert!(matches!(
+            error,
+            DbmError::Driver {
+                driver: "PostgreSQL",
+                ..
+            }
+        ));
+    }
 
     fn sample_postgres_migration() -> Migration {
         Migration {

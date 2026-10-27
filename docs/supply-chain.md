@@ -114,8 +114,13 @@ synthetic files (19 and 18 bytes) written by harmless containers to isolated
 scratch mounts, all using parent-side descriptor-based checks. They did not
 execute target code or validate target-generated files. Offline vendoring
 stopped because the locked crate `combine v4.6.9` is missing; nothing was
-fetched. Pushes for `147fab1`, `863ecb6`, and `38f8882`, plus one rerun of the
-first, failed before runner assignment or any workflow step; the cause is
-unknown. Full target execution and target-produced artifact handling remain
-unverified, so these smokes do not
-constitute runtime-gate evidence or change the pending status.
+fetched.
+
+GitHub Actions run `40439858818`, attempt 2, later passed formatting, Clippy,
+tests, build, and executable examples. Its supply-chain job failed because
+`cargo-deny` rejected `rustls-pemfile 2.2.0` under `unmaintained = "all"`
+(`RUSTSEC-2025-0134`). CycloneDX generation and SBOM upload were skipped. The
+implementation now uses the maintained `rustls-pki-types` PEM API instead;
+verification of this change is pending the next CI run. The dependency policy
+was not weakened. Full target sandbox/file handling, fuzzing, and the 12-scenario
+failure matrix remain unverified, so G11 is still pending.

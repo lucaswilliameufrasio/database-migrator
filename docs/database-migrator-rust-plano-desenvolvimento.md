@@ -1215,20 +1215,25 @@ schemas/prompt contracts, preview de contexto seguro, nenhuma chamada sem opt-in
 e nenhuma transição AI→apply têm cobertura automatizada e builds padrão/AI
 verificados. Isso não aprova G11 ou a V1.
 
-**F11 — parcial (2026-10-26; G11 pendente):** o baseline local e os testes de
+**F11 — parcial (2026-10-27; G11 pendente):** o baseline local e os testes de
 falha anteriores permanecem registrados. Foram adicionados dois alvos libFuzzer
 (`sql_scanner` e `migration_parser`) com corpus inicial, wrappers internos sob a
 feature opt-in `fuzzing-harness`, dois exemplos executáveis, `deny.toml`, script
 de auditoria/SBOM e job de supply chain com ferramentas fixadas. O CI passou a
-executar os exemplos e a guardar SBOM CycloneDX como artefato temporário; os
-pushes de `147fab1` e `863ecb6` e um rerun falharam antes da atribuição de runner
-ou execução de steps, sem causa identificada.
+executar os exemplos e a guardar SBOM CycloneDX como artefato temporário. No
+rerun manual `40439858818`, attempt 2, o job de qualidade passou (format,
+Clippy, testes, build e exemplos); o job supply-chain parou em `cargo-deny` ao
+rejeitar `rustls-pemfile 2.2.0` (`RUSTSEC-2025-0134`).
 As versões upstream foram verificadas em 2026-10-26. No sandbox offline local
 faltam `cargo-fuzz`,
 `libfuzzer-sys`, `cargo-audit`, `cargo-deny`, `cargo-cyclonedx` e nightly; por
-isso não há evidência local de fuzz guiado, auditoria de dependências ou saída
-SBOM. Um smoke posterior de Docker rootless verificou limites configuráveis de
-CPU, memória, processos e tmpfs, com filesystem read-only e rede desativada;
+isso não há evidência local de fuzz guiado ou SBOM. O `cargo audit` remoto
+completou com um warning permitido; `cargo-deny` bloqueou o job pelo crate não
+mantido. Para preservar a política `unmaintained = "all"`, o código agora troca
+`rustls-pemfile` pela API PEM de `rustls-pki-types`; testes e supply-chain CI desta
+alteração ainda estão pendentes. Um smoke posterior de Docker rootless verificou
+limites configuráveis de CPU, memória, processos e tmpfs, com filesystem
+read-only e rede desativada;
 nenhum código-alvo foi executado. A resolução offline do workspace parou porque
 `combine v4.6.9` não está no cache local; nenhum pacote foi baixado. Smokes
 limitados de promoção parent-side passaram para 16 bytes sintéticos de stdout e
