@@ -4,7 +4,7 @@ set -eu
 
 cargo audit
 cargo deny --all-features check
-cargo cyclonedx --all-features --format json
+cargo cyclonedx --all-features --format json --override-filename bom
 
 python3 - <<'PY'
 import json

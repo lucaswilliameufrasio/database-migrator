@@ -121,6 +121,10 @@ tests, build, and executable examples. Its supply-chain job failed because
 `cargo-deny` rejected `rustls-pemfile 2.2.0` under `unmaintained = "all"`
 (`RUSTSEC-2025-0134`). CycloneDX generation and SBOM upload were skipped. The
 implementation now uses the maintained `rustls-pki-types` PEM API instead;
-verification of this change is pending the next CI run. The dependency policy
-was not weakened. Full target sandbox/file handling, fuzzing, and the 12-scenario
-failure matrix remain unverified, so G11 is still pending.
+the dependency-policy check now passes. In run `40452036445`, CI then failed
+because `cargo-cyclonedx`'s default output filename did not match the script's
+expected `bom.json`; the upload did not run. The script now requests the `bom`
+output filename explicitly. Verification of this correction is pending the next
+CI run. The dependency policy was not weakened. Full target sandbox/file
+handling, fuzzing, and the 12-scenario failure matrix remain unverified, so G11
+is still pending.

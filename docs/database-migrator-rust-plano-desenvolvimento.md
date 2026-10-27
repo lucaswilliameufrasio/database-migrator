@@ -1231,7 +1231,11 @@ isso não há evidência local de fuzz guiado ou SBOM. O `cargo audit` remoto
 completou com um warning permitido; `cargo-deny` bloqueou o job pelo crate não
 mantido. Para preservar a política `unmaintained = "all"`, o código agora troca
 `rustls-pemfile` pela API PEM de `rustls-pki-types`; testes e supply-chain CI desta
-alteração ainda estão pendentes. Um smoke posterior de Docker rootless verificou
+alteração passaram no job de qualidade e no `cargo-deny` do run `40452036445`;
+o job supply-chain falhou depois porque o nome default do arquivo gerado pelo
+`cargo-cyclonedx` não correspondia a `bom.json`, que o script tentava validar.
+Foi adicionado `--override-filename bom`; a próxima CI ainda precisa confirmar a
+geração/validação e upload. Um smoke posterior de Docker rootless verificou
 limites configuráveis de CPU, memória, processos e tmpfs, com filesystem
 read-only e rede desativada;
 nenhum código-alvo foi executado. A resolução offline do workspace parou porque
