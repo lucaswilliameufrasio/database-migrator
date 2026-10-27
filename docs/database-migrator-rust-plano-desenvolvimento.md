@@ -1234,8 +1234,10 @@ mantido. Para preservar a política `unmaintained = "all"`, o código agora troc
 alteração passaram no job de qualidade e no `cargo-deny` do run `40452036445`;
 o job supply-chain falhou depois porque o nome default do arquivo gerado pelo
 `cargo-cyclonedx` não correspondia a `bom.json`, que o script tentava validar.
-Foi adicionado `--override-filename bom`; a próxima CI ainda precisa confirmar a
-geração/validação e upload. Um smoke posterior de Docker rootless verificou
+Foi adicionado `--override-filename bom`; o run `40452962185`, no commit
+`980629d`, passou nos dois jobs. A auditoria de dependências, geração e validação
+do SBOM, e upload do artefato passaram; o `bom.json` baixado foi parseado como
+CycloneDX 1.3 com 238 componentes. Um smoke posterior de Docker rootless verificou
 limites configuráveis de CPU, memória, processos e tmpfs, com filesystem
 read-only e rede desativada;
 nenhum código-alvo foi executado. A resolução offline do workspace parou porque

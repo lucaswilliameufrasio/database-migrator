@@ -123,8 +123,10 @@ tests, build, and executable examples. Its supply-chain job failed because
 implementation now uses the maintained `rustls-pki-types` PEM API instead;
 the dependency-policy check now passes. In run `40452036445`, CI then failed
 because `cargo-cyclonedx`'s default output filename did not match the script's
-expected `bom.json`; the upload did not run. The script now requests the `bom`
-output filename explicitly. Verification of this correction is pending the next
-CI run. The dependency policy was not weakened. Full target sandbox/file
-handling, fuzzing, and the 12-scenario failure matrix remain unverified, so G11
-is still pending.
+expected `bom.json`; the upload did not run. Commit `980629d` requests the `bom`
+output filename explicitly. Run `40452962185` passed both CI jobs, including
+`cargo audit`, `cargo-deny`, SBOM generation and script validation, and artifact
+upload. The uploaded artifact `database-migrator-sbom-980629d54524f5f0ab403dfcbdb4dc3ed19064de`
+was downloaded and `bom.json` parsed as CycloneDX 1.3 with 238 components. The
+dependency policy was not weakened. Full target sandbox/file handling, fuzzing,
+and the 12-scenario failure matrix remain unverified, so G11 is still pending.
