@@ -1230,9 +1230,10 @@ isso não há evidência local de fuzz guiado, auditoria de dependências ou sa�
 SBOM. Um smoke posterior de Docker rootless verificou limites configuráveis de
 CPU, memória, processos e tmpfs, com filesystem read-only e rede desativada;
 nenhum código-alvo foi executado. A resolução offline do workspace parou porque
-`combine v4.6.9` não está no cache local; nenhum pacote foi baixado. Um smoke
-limitado de promoção parent-side passou para 16 bytes sintéticos de stdout,
-com descritores de diretório, allowlist, limite de bytes e criação exclusiva;
+`combine v4.6.9` não está no cache local; nenhum pacote foi baixado. Smokes
+limitados de promoção parent-side passaram para 16 bytes sintéticos de stdout e
+dois arquivos sintéticos de 19 e 18 bytes escritos em scratch isolado, com
+descritores de diretório, allowlist, limite de bytes e criação exclusiva;
 arquivos gerados pelo target não foram testados. Em 2026-10-26 foi feita uma
 revisão de segurança source-only do repositório no commit
 `9a8dd95c3143fe9adc59f1c51fba820ad05db129`: 20 unidades foram mapeadas,
