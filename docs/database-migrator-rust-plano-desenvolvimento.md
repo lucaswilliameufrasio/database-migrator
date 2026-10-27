@@ -1220,17 +1220,24 @@ falha anteriores permanecem registrados. Foram adicionados dois alvos libFuzzer
 (`sql_scanner` e `migration_parser`) com corpus inicial, wrappers internos sob a
 feature opt-in `fuzzing-harness`, dois exemplos executáveis, `deny.toml`, script
 de auditoria/SBOM e job de supply chain com ferramentas fixadas. O CI passou a
-executar os exemplos e a guardar SBOM CycloneDX como artefato temporário; esse
-job ainda não foi observado nesta execução. As versões upstream foram
-verificadas em 2026-10-26. No sandbox offline local faltam `cargo-fuzz`,
+executar os exemplos e a guardar SBOM CycloneDX como artefato temporário; o push
+e um rerun falharam antes de executar qualquer step, sem causa identificada.
+As versões upstream foram verificadas em 2026-10-26. No sandbox offline local
+faltam `cargo-fuzz`,
 `libfuzzer-sys`, `cargo-audit`, `cargo-deny`, `cargo-cyclonedx` e nightly; por
 isso não há evidência local de fuzz guiado, auditoria de dependências ou saída
-SBOM. Em 2026-10-26 foi feita uma revisão de segurança source-only do repositório
-no commit `9a8dd95c3143fe9adc59f1c51fba820ad05db129`: 20 unidades foram mapeadas,
+SBOM. Um smoke posterior de Docker rootless verificou limites configuráveis de
+CPU, memória, processos e tmpfs, com filesystem read-only e rede desativada;
+nenhum código-alvo foi executado. A resolução offline do workspace parou porque
+`combine v4.6.9` não está no cache local; nenhum pacote foi baixado. A promoção
+segura de evidência ainda não foi estabelecida. Em 2026-10-26 foi feita uma
+revisão de segurança source-only do repositório no commit
+`9a8dd95c3143fe9adc59f1c51fba820ad05db129`: 20 unidades foram mapeadas,
 13 encerradas por revisão de fonte, quatro fingerprints únicos continuam
 `needs_validation`, dois candidatos foram rejeitados e uma unidade de supply
 chain ficou bloqueada. Nenhum candidato foi confirmado. A revisão não executou
-código-alvo por falta de sandbox completo e não equivale à auditoria completa nem
+código-alvo: os limites básicos do smoke não bastam sem dependências offline
+completas e promoção segura de evidência. Não equivale à auditoria completa nem
 a uma declaração de ausência de issues críticas. A matriz de fault injection de
 12 cenários não foi concluída; a resolução transitiva do pacote fuzz ainda não
 tem lockfile próprio auditado. A cobertura existente inclui kill durante
