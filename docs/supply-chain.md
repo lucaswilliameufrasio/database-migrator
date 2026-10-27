@@ -96,19 +96,23 @@ source-covered, six candidate-linked units represent four unique
 hypotheses were rejected; no candidate was confirmed. The complete report and
 structured records are maintained outside this repository. This was not a
 complete validated audit: target code was not run because offline locked
-dependency resolution was incomplete and safe parent-side evidence promotion
-was not established. The dependency checks
+dependency resolution was incomplete. A bounded parent-side promotion smoke
+passed for synthetic stdout only; it did not cover target-generated files or
+the complete target sandbox. The dependency checks
 above are not a substitute for reviewing trust boundaries, credential handling,
 file/path boundaries, database adapters, runner execution, or AI proposal
 handling. Do not infer “no critical issues” from this review or a green
 dependency scan. G11 remains pending until the unresolved validation, fuzzing,
 dependency, SBOM, and required failure-matrix evidence is recorded.
 
-A follow-up on the documentation-only commit `147fab1` verified that a rootless
-Docker smoke container exposes explicit CPU, memory, process, and tmpfs bounds
-with a read-only root filesystem and network-disabled configuration. It did not
-run target code. Offline vendoring stopped because the locked crate
-`combine v4.6.9` is missing; nothing was fetched. One rerun of the GitHub Actions
-workflow also failed before any job step was recorded; its cause is unknown.
-The full target execution and safe artifact-promotion path remain unverified, so
-this smoke is not runtime-gate evidence and does not change the pending status.
+A follow-up on documentation commits `147fab1` and `863ecb6` verified that a
+rootless Docker smoke container exposes explicit CPU, memory, process, and tmpfs
+bounds with a read-only root filesystem and network-disabled configuration. A
+separate bounded promotion smoke passed for 16 synthetic stdout bytes using
+parent-side descriptor-based checks; it did not execute target code or promote
+target-generated files. Offline vendoring stopped because the locked crate
+`combine v4.6.9` is missing; nothing was fetched. Both push runs and one rerun of
+the first failed before runner assignment or any workflow step; the cause is
+unknown. Full target execution and target-produced artifact handling remain
+unverified, so these smokes do not constitute runtime-gate evidence or change
+the pending status.
