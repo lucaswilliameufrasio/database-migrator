@@ -52,3 +52,15 @@ and disposable loopback database instances documented in the README; never run
 these drills against a shared or production database. The results recorded for
 PostgreSQL 16/17/18, MySQL 8.4, and MariaDB 10.11/11.4/11.8 do not establish
 support for unlisted server versions.
+
+On 2026-10-29, a local offline all-features workspace test run passed the unit,
+SQLite CLI, DSL, legacy-import, and registry groups, but two of five
+`runner_protocol` tests exceeded their configured 30-second runner timeout.
+A subsequent serial `runner_protocol` run did not finish within the local
+command's 420-second limit. Unrelated Cargo test/build jobs were active and host
+load was elevated during these attempts; this is a possible environmental
+factor, not a demonstrated cause. The remote CI rerun for commit `ef9b172`
+passed the complete quality job. Treat the local runner-protocol result as
+inconclusive rather than as a passed local gate or a confirmed product defect.
+These runs were ordinary development tests, not execution under the audit's
+required complete sandbox and not evidence for the 12-scenario matrix.

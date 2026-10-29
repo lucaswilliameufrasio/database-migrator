@@ -1261,6 +1261,16 @@ transação SQLite, interrupção de processo MySQL não transacional e perda de
 sessão PostgreSQL, com testes de banco opt-in. Documentação de recuperação e
 artefatos draft de F12 foram preparados. G11 não foi aprovado.
 
+**Atualização 2026-10-29:** `cargo test --workspace --all-features --locked
+--offline` passou nos grupos unitários, CLI SQLite, DSL, importação de legado e
+registry, mas dois dos cinco testes de `runner_protocol` excederam o timeout
+configurado de 30 segundos. Uma repetição serial de `runner_protocol` não
+terminou dentro do limite local de 420 segundos. Havia outros jobs Cargo e carga
+elevada no host; isso pode ter contribuído, mas a causa não foi comprovada. O
+rerun remoto da CI de `ef9b172` passou no job de qualidade completo. O resultado
+local é inconclusivo, não evidência de sandbox, nem substitui fuzzing, a matriz
+de 12 cenários ou as quatro validações pendentes; G11/G12 seguem pendentes.
+
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 
 **G12** — Tag estável com release notes, checksums assinados quando possível, binários homologados, changelog, upgrade guide, compatibilidade semver, matriz de testes publicada e exemplos de CI de deploy seguros.
