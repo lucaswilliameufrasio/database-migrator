@@ -1271,6 +1271,15 @@ rerun remoto da CI de `ef9b172` passou no job de qualidade completo. O resultado
 local é inconclusivo, não evidência de sandbox, nem substitui fuzzing, a matriz
 de 12 cenários ou as quatro validações pendentes; G11/G12 seguem pendentes.
 
+**Fuzz — atualização 2026-10-29:** em scratch rootless foram instalados
+`cargo-fuzz 0.13.2`, `cargo-audit 0.22.2`, `cargo-deny 0.20.2` e nightly
+`1.101.0-nightly`; um `fuzz/Cargo.lock` de 242 pacotes foi gerado fora do
+checkout. O fetch/audit transitivo não concluiu porque o `/tmp` compartilhado
+(tmpfs de 7,8 GiB) ficou sem espaço ao desempacotar crates de outras plataformas.
+Nenhum alvo fuzz foi executado, o lockfile não foi incorporado nem aprovado, e
+G11 continua pendente. Retomar em scratch com espaço suficiente, terminar a
+auditoria do grafo completo e executar cada alvo em container rootless sem rede.
+
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 
 **G12** — Tag estável com release notes, checksums assinados quando possível, binários homologados, changelog, upgrade guide, compatibilidade semver, matriz de testes publicada e exemplos de CI de deploy seguros.

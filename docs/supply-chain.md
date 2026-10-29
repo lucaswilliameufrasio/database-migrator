@@ -82,9 +82,14 @@ cargo +nightly fuzz run sql_scanner -- -max_total_time=300 -max_len=65536
 cargo +nightly fuzz run migration_parser -- -max_total_time=300 -max_len=65536
 ```
 
-Fuzzing has not yet been executed in the current isolated environment because
-`cargo-fuzz`, `libfuzzer-sys`, and a nightly toolchain are not available in its
-offline cache. The targets and seed corpora are prepared, but this is not fuzz
+**Status 2026-10-29:** `cargo-fuzz` 0.13.2, `cargo-audit` 0.22.2,
+`cargo-deny` 0.20.2, and nightly `1.101.0-nightly` were installed in a
+disposable rootless-Docker scratch environment. A scratch-only
+`fuzz/Cargo.lock` was generated for 242 packages, but the dependency fetch and
+full graph audit did not complete: the shared `/tmp` tmpfs reached 100% while
+Cargo unpacked target-specific crates. No fuzz target was executed. The
+generated lockfile remains outside the checkout and is not audited or accepted
+for commit. The targets and seed corpora are prepared, but this is not fuzz
 coverage evidence and does not close G11.
 
 ## Security review status
