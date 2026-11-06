@@ -267,8 +267,11 @@ boundaries; the opt-in server tests were ignored. The external security-review
 report and four structured `needs_validation` records were not present in this
 checkout or the inspected scratch artifacts, so their content/status cannot be
 independently updated here. No G11 approval or G12/release authorization is
-implied. The exact fuzz corpus was not retained, and no new GitHub Actions run
-has verified these changes.
+implied. The exact fuzz corpus was not retained. The push-triggered run
+`42312783506` on commit `5672dd0df75774cdc28d161d01428bce13b66bc2` subsequently
+passed both CI jobs: formatting, Clippy, tests, build, examples, both dependency
+audits, SBOM generation, and artifact upload. This does not close the recovery
+matrix or four candidate validations.
 
 Remaining G11 evidence includes the twelve-scenario matrix, the four external
 candidate validations, a performance baseline, review/triage of the separate
@@ -280,5 +283,6 @@ reported crash during the recorded runs.
 passed again with the pinned audit tools and refreshed RustSec data (1,422
 advisories): root lock 300 packages and fuzz lock 244 packages; both audit and
 deny graphs passed. The regenerated application BOM validated as CycloneDX 1.3
-with 238 components. Log: `attempt-02/logs/supply-chain-final.log`. This is local
-evidence; the push-triggered GitHub Actions checks are not yet observed.
+with 238 components. Log: `attempt-02/logs/supply-chain-final.log`. The
+push-triggered CI run `42312783506` on `5672dd0` also passed both jobs and
+uploaded the SBOM; see the recorded workflow result above.

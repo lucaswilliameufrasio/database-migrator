@@ -1335,9 +1335,10 @@ apenas para kill durante SQL transacional no SQLite; os testes de servidor
 opt-in estavam ignorados. O relatório de revisão externo e os quatro registros
 `needs_validation` não foram encontrados no checkout/scratch inspecionados e não
 foram validados nesta continuação. O fuzz, supply chain, qualidade local e
-exemplos acima têm evidência; o corpus gerado não foi preservado e não há novo
-resultado de CI para estas alterações. G11 continua parcial/pendente; G12 segue
-pendente e sem autorização de release.
+exemplos acima têm evidência; o corpus gerado não foi preservado. O CI do push,
+run `42312783506` no commit `5672dd0`, passou os dois jobs (qualidade, auditoria,
+SBOM e upload). G11 continua parcial/pendente; G12 segue pendente e sem
+autorização de release.
 
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 
