@@ -49,10 +49,10 @@ SHA. The repository has no stable release process yet.
 
 ## Consequences and evidence
 
-- The fuzz package needs its own checked-in lockfile, nightly compiler, and
-  LLVM sanitizer/C++ toolchain; fuzz findings and corpus changes must be
-  triaged before G11 can pass. The package's transitive dependency graph is not
-  yet included in the root dependency audit.
+- The fuzz package has a separate lockfile and needs a nightly compiler plus
+  LLVM sanitizer/C++ toolchain. Its dependency graph is audited separately from
+  the root application graph. Fuzz findings and corpus changes must be triaged
+  before G11 can pass.
 - CI uses the latest pinned stable toolchain for ordinary builds; the fuzz
   toolchain is separate and its exact revision must be recorded with any run.
 - SBOMs are commit-specific CI artifacts with 30-day retention and are not
@@ -62,8 +62,24 @@ SHA. The repository has no stable release process yet.
   `actions/checkout` 7.0.1 and `actions/upload-artifact` 7.0.2 were checked
   against canonical releases and security pages; full commit SHAs are pinned in
   CI.
-- Fuzzing and a full security review have not yet been performed in the current
-  environment. This ADR records the implementation choice, not G11 approval.
+- At the original decision date, fuzzing and a full security review had not yet
+  been performed. Later bounded fuzz and audit evidence is recorded in
+  `docs/supply-chain.md`; this ADR and those runs do not approve G11.
+
+## Follow-up decision: NCSA allowance (2026-10-29)
+
+The project owner explicitly approved accepting NCSA after reviewing its
+permissive redistribution/notice and non-endorsement requirements. Add `NCSA`
+to the existing license allowlist for `libfuzzer-sys 0.4.13`, whose manifest
+declares `(MIT OR Apache-2.0) AND NCSA`; retain the existing fuzz engine rather
+than replacing the harness or relying on older license metadata. This allowance
+applies to every graph checked with this policy, not only this crate. It does
+not change the application's MIT/Apache-2.0 licensing, permit advisories, or
+relax the execution sandbox. The fuzzer remains outside the normal application
+graph. Redistributing fuzz tooling must preserve applicable upstream notices,
+license texts, and disclaimers and must not suggest upstream endorsement.
+See [supply-chain.md](../supply-chain.md) for checks and execution evidence.
+Revisit if the fuzzer enters application artifacts or redistribution changes.
 
 ## Revisit when
 

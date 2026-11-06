@@ -1280,6 +1280,65 @@ Nenhum alvo fuzz foi executado, o lockfile não foi incorporado nem aprovado, e
 G11 continua pendente. Retomar em scratch com espaço suficiente, terminar a
 auditoria do grafo completo e executar cada alvo em container rootless sem rede.
 
+**Fuzz — continuação neste checkout em 2026-10-29:** o scratch indicado estava
+vazio e a saída do erro local não foi encontrada; sua causa continua desconhecida.
+Após autorização para continuar sem esse log, o preflight confirmou 735 GiB
+livres em `/mnt/storage/projects` e Docker com `name=rootless`. O lockfile já
+presente, não rastreado, contém 244 pacotes. `cargo audit --file fuzz/Cargo.lock`
+passou com 1.386 advisories carregados. O check
+`cargo deny --manifest-path fuzz/Cargo.toml --all-features --locked check`
+detectou metadados ausentes e licença NCSA não permitida. Foram corrigidos apenas
+a licença do harness (`MIT OR Apache-2.0`) e a versão da dependência local
+(`=0.1.0`). A repetição retornou exit 4: `advisories ok, bans ok, licenses FAILED,
+sources ok`; `libfuzzer-sys 0.4.13` exige NCSA além de MIT/Apache-2.0.
+`deny.toml` permanece intacto. Logs preservados no scratch em
+`attempt-01/logs/`; detalhes em `docs/supply-chain.md`. O lockfile não está
+aprovado para commit. Build e execução dos dois alvos não foram iniciados porque
+a auditoria obrigatória falhou. Próximo passo: resolver a incompatibilidade de
+licença sem contornar a política; só então executar os dois alvos por 300 s,
+`-max_len=65536`, em sandbox rootless sem rede e com fonte protegida.
+A matriz de 12 cenários e as quatro validações continuam sem nova evidência;
+G11/G12 permanecem pendentes e não houve release/tag.
+
+*Nota de sequência:* este registro descreve o estado antes da autorização NCSA
+e foi supersedido pelas atualizações logo abaixo.
+
+**Continuação autorizada — NCSA (2026-10-29):** o responsável pelo projeto
+aprovou explicitamente a inclusão de NCSA na allowlist, mantendo obrigações de
+avisos/redistribuição e sem alterar advisories ou isolamento (ADR-022). Após essa
+única mudança de política, o check locked do pacote fuzz passou em advisories,
+bans, licenses e sources; `cargo audit --file fuzz/Cargo.lock` também passou
+novamente (244 dependências, 1.386 advisories). O lockfile pode agora ser incluído;
+o script de supply chain passou a auditar os dois grafos. Preparação e logs desta
+tentativa ficam em `.scratch/dbm-fuzz-20261029/attempt-02/`, fora do checkout.
+Naquele ponto, build/execução dos alvos ainda estavam pendentes; resultados
+posteriores estão registrados abaixo. Isso não aprova G11/G12.
+
+**Execução local — 2026-10-30:** build fuzz com Clang/ASan passou em container
+rootless sem rede. `sql_scanner` terminou com exit 0, 2.225.928 entradas em
+301 s, `-max_total_time=300 -max_len=65536`, sem artefato de crash listado.
+A coleta do tmpfs via `docker cp` falhou após a execução; corpus gerado não foi
+preservado, e `migration_parser` ainda não havia iniciado. Na nova tentativa,
+`migration_parser` passou com exit 0, 2.464.278 entradas em 301 s, o mesmo
+`-max_total_time=300 -max_len=65536`; coleta limitada via tar não encontrou crash.
+O corpus gerado não foi preservado. Clippy, testes não ignorados
+com todas as features (inclusive os cinco testes de runner) e build passaram
+em container isolado; informações de debug reduzidas a linhas. O primeiro exemplo
+não compilou por falta de espaço no tmpfs limitado; nova tentativa em ambiente
+limpo executou os dois exemplos com exit 0, incluindo aplicação e rollback
+isolados no SQLite. Logs e ressalvas em `docs/supply-chain.md`. Matriz de 12
+cenários e quatro validações permanecem pendentes; não há aprovação de G11/G12.
+
+**Revisão de progresso — 2026-11-06:** a matriz foi detalhada em
+`docs/recovery-drills.md`. Dos limites de crash nela listados, há evidência local
+apenas para kill durante SQL transacional no SQLite; os testes de servidor
+opt-in estavam ignorados. O relatório de revisão externo e os quatro registros
+`needs_validation` não foram encontrados no checkout/scratch inspecionados e não
+foram validados nesta continuação. O fuzz, supply chain, qualidade local e
+exemplos acima têm evidência; o corpus gerado não foi preservado e não há novo
+resultado de CI para estas alterações. G11 continua parcial/pendente; G12 segue
+pendente e sem autorização de release.
+
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 
 **G12** — Tag estável com release notes, checksums assinados quando possível, binários homologados, changelog, upgrade guide, compatibilidade semver, matriz de testes publicada e exemplos de CI de deploy seguros.

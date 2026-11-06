@@ -17,6 +17,7 @@ allow = [
     "LGPL-2.1-or-later",
     "MIT",
     "MIT-0",
+    "NCSA",
     "Unicode-3.0",
     "Unlicense",
     "Zlib",

@@ -3,7 +3,9 @@
 set -eu
 
 cargo audit
-cargo deny --all-features check
+cargo deny --all-features --locked check
+cargo audit --file fuzz/Cargo.lock
+cargo deny --manifest-path fuzz/Cargo.toml --all-features --locked check
 cargo cyclonedx --all-features --format json --override-filename bom
 
 python3 - <<'PY'

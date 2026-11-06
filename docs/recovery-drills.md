@@ -47,6 +47,39 @@ section 13.3. Current source evidence is narrower than the complete matrix:
 | Runner absent, incompatible, timed out, or emitting extra frames | `tests/runner_protocol.rs::missing_runner_timeout_and_extra_frames_fail_without_partial_sql` and adjacent handshake tests | Covered locally; timeout test uses a disposable project |
 | All twelve crash boundaries, shared-schema namespace races, every metadata bootstrap/upgrade boundary, and rollback crash windows | No complete, repeatable matrix is currently recorded. The repository-wide source-only security review on 2026-10-26 did not execute target code or add fault-injection evidence. | Pending; G11 is not approved |
 
+### Matrix traceability as of 2026-11-06
+
+The numbered rows below correspond to section 13.3 of the development plan.
+They are a gap inventory, not a claim that source inspection or a related test
+proves a whole scenario across every database and failure boundary.
+
+| # | Required boundary | Evidence and remaining gap |
+|---|---|---|
+| 1 | Death before intent | No targeted kill-boundary evidence identified; pending. |
+| 2 | Death after intent, before SQL | No targeted kill-boundary evidence identified; pending. |
+| 3 | Death during SQL | SQLite CLI kill test below passed locally; MySQL and PostgreSQL tests exist but were ignored in that local run. Cross-driver scenario remains incomplete. |
+| 4 | SQL completed, death before acknowledgement | No targeted kill-boundary evidence identified; pending. |
+| 5 | Acknowledgement persisted, death before final state | No targeted kill-boundary evidence identified; pending. |
+| 6 | MySQL/MariaDB partial DDL, third step fails | Opt-in CLI journeys include partial-failure cases; both were ignored locally. Pending fresh isolated-server evidence. |
+| 7 | Native-lock session loss and competing instance | PostgreSQL session-loss test exists but was ignored locally; competing-instance behavior at this boundary remains unverified. |
+| 8 | Two CLIs, same DB and namespace | No targeted two-CLI fault-matrix evidence identified; pending. |
+| 9 | Two namespaces sharing schema object | No targeted race evidence identified; pending. |
+| 10 | Failure during metadata bootstrap/upgrade | No complete injected-failure boundary evidence identified; pending. |
+| 11 | Rollback then crash before run recorded | No targeted kill-boundary evidence identified; pending. |
+| 12 | Plan and source changed between approval and execution | Import-specific drift/digest tests passed, but they do not establish the general migration approval/execution boundary; pending. |
+
+In the isolated all-features workspace run recorded in `docs/supply-chain.md`,
+`killing_cli_during_a_transaction_keeps_the_next_write_blocked` passed. It uses
+a disposable SQLite database, kills a CLI after observing a started run and
+writer lock, checks the transaction's schema effects were rolled back and the
+run/diagnostic lock remained, and checks a subsequent `up` returns
+`SAFETY_BLOCKED`. It does not prove the other databases or exact completion
+boundaries. The same log explicitly marks
+`local_postgres_session_loss_during_fsm_ddl_is_not_retried`,
+`cli_runs_mysql_nontransactional_migration_and_recovery_journey`, and
+`cli_runs_mariadb_nontransactional_migration_and_recovery_journey` ignored.
+Log: `/mnt/storage/projects/.scratch/dbm-fuzz-20261029/attempt-02/logs/tests.log`.
+
 The opt-in database tests are ignored by default. Use only the test variables
 and disposable loopback database instances documented in the README; never run
 these drills against a shared or production database. The results recorded for
