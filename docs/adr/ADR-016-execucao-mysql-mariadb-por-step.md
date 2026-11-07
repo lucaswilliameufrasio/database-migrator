@@ -76,3 +76,27 @@ e MariaDB 10.11.14. Essas evidências são testes locais opt-in, não uma promes
 de compatibilidade com versões fora da matriz nem uma autorização para uso em
 produção. Os testes estão em `tests/cli.rs` e exigem variáveis de ambiente que
 apontem exclusivamente para servidores descartáveis em loopback.
+
+## Decisão de acompanhamento: validar as linhas estáveis mais recentes (2026-11-07)
+
+O responsável pelo projeto pediu que os testes usem também a versão estável mais
+recente de cada banco, sem descartar a validação das versões anteriores. Para
+que a jornada normal do adaptador alcance esses servidores, a lista explícita de
+versões aceitas agora inclui MySQL 9.7 e MariaDB 13.0, além das linhas já aceitas
+MySQL 8.4 e MariaDB 10.11/11.4/11.8. O escopo da mudança é somente reconhecimento
+da linha e execução da jornada de recuperação focada; ela não certifica toda a
+matriz de integração, todo patch, topologia ou prontidão para produção.
+
+Em 2026-11-07, as jornadas de recuperação passaram duas vezes em instâncias
+descartáveis para MySQL 9.7.4 e MariaDB 13.0.2. As versões anteriores continuam
+na matriz e mantêm as evidências já registradas. PostgreSQL 18.6 e SQLite 3.54.1
+também foram exercitados no conjunto focado; o runtime SQLite 3.54.1 foi ligado
+somente para o teste local, enquanto o artefato padrão continua empacotando a
+versão definida por `rusqlite` no lockfile. Fontes oficiais e detalhes estão em
+[`recovery-drills.md`](../recovery-drills.md) e na
+[matriz provisória](../support-matrix.md).
+
+Não se ampliaram as linhas aceitas para versões intermediárias não verificadas,
+como MySQL 9.6 ou MariaDB 12.3. Reavaliar a lista quando uma nova versão estável
+for publicada; executar novamente a matriz focada não substitui a cobertura
+completa antes de declarar G11 concluído.

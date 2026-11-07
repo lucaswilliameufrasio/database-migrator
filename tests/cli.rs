@@ -635,8 +635,8 @@ fn run_mysql_cli_journey(environment_variable: &str, expected_vendor: &str) {
         );
     } else {
         assert!(
-            !is_mariadb && version.starts_with("8.4."),
-            "the configured integration server is not MySQL 8.4"
+            !is_mariadb && (version.starts_with("8.4.") || version.starts_with("9.7.")),
+            "the configured integration server is not MySQL 8.4 or 9.7"
         );
     }
     let database = format!("dbm_f5_{}", uuid::Uuid::new_v4().simple());
@@ -740,7 +740,7 @@ fn run_mysql_cli_journey(environment_variable: &str, expected_vendor: &str) {
             "SELECT metadata_format_version FROM schema_migration_meta WHERE singleton = 1"
         )
         .expect("inspect MySQL metadata format"),
-        3
+        5
     );
     assert_eq!(
         mysql_scalar(&base_url, &database, "SELECT COUNT(*) FROM schema_migration_steps WHERE transaction_class = 'non_transactional' AND state = 'acknowledged'")
@@ -1917,7 +1917,7 @@ fn cli_runs_postgres_transactional_and_concurrent_index_migrations() {
 }
 
 #[test]
-#[ignore = "requires DBM_TEST_MYSQL_URL for a disposable loopback MySQL 8.4 instance"]
+#[ignore = "requires DBM_TEST_MYSQL_URL for a disposable loopback MySQL instance"]
 fn cli_runs_mysql_nontransactional_migration_and_recovery_journey() {
     run_mysql_cli_journey("DBM_TEST_MYSQL_URL", "mysql");
 }

@@ -2448,13 +2448,15 @@ fn ensure_supported_server_version(vendor: DatabaseVendor, version: &str) -> Res
     let supported = matches!(
         (vendor, major, minor),
         (DatabaseVendor::MySql, Some(8), Some(4))
+            | (DatabaseVendor::MySql, Some(9), Some(7))
             | (DatabaseVendor::MariaDb, Some(10), Some(11))
             | (DatabaseVendor::MariaDb, Some(11), Some(4))
             | (DatabaseVendor::MariaDb, Some(11), Some(8))
+            | (DatabaseVendor::MariaDb, Some(13), Some(0))
     );
     if !supported {
         return Err(DbmError::Unsupported(format!(
-            "{} server version {version} is outside the initial F5 support matrix",
+            "{} server version {version} is outside the declared F5 support matrix",
             vendor.label()
         )));
     }
@@ -2624,8 +2626,9 @@ mod tests {
     }
 
     #[test]
-    fn supports_only_the_declared_mysql_and_mariadb_lines() {
+    fn supports_declared_mysql_and_mariadb_lines() {
         assert!(ensure_supported_server_version(DatabaseVendor::MySql, "8.4.5").is_ok());
+        assert!(ensure_supported_server_version(DatabaseVendor::MySql, "9.7.4").is_ok());
         assert!(
             ensure_supported_server_version(DatabaseVendor::MariaDb, "10.11.14-MariaDB").is_ok()
         );
@@ -2634,9 +2637,14 @@ mod tests {
                 .is_ok()
         );
         assert!(ensure_supported_server_version(DatabaseVendor::MariaDb, "11.8.2-MariaDB").is_ok());
+        assert!(ensure_supported_server_version(DatabaseVendor::MariaDb, "13.0.2-MariaDB").is_ok());
         assert!(ensure_supported_server_version(DatabaseVendor::MySql, "8.0.42").is_err());
+        assert!(ensure_supported_server_version(DatabaseVendor::MySql, "9.6.0").is_err());
         assert!(
             ensure_supported_server_version(DatabaseVendor::MariaDb, "10.6.23-MariaDB").is_err()
+        );
+        assert!(
+            ensure_supported_server_version(DatabaseVendor::MariaDb, "12.3.3-MariaDB").is_err()
         );
     }
 

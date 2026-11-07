@@ -8,10 +8,10 @@ application and metadata contracts remain provisional.
 
 | Database | Versions exercised | Verified behavior and limits |
 |---|---|---|
-| SQLite | Bundled through `rusqlite`; the exact SQLite runtime version is not recorded in the current gate evidence | Default automated suite; transactional migrations, rollback, metadata, and recovery tests. No external server required. |
-| PostgreSQL | 16.15, 17.11, 18.6 | CLI and adapter integration, metadata v3/v4 inspection and explicit v3→v5/v4→v5 upgrades, TLS checks, session locks, transactional migrations, supported concurrent-index reconciliation, and runner interactions. Some recovery cases are opt-in. |
-| MySQL | 8.4.11 | Non-transactional migration journey with explicit `transaction = never`, per-statement journal, locks, partial failure, process interruption, explicit reconciliation, TLS checks, and metadata v3/v4→v5 upgrades. |
-| MariaDB | 10.11.14, 11.4.13, 11.8.2 | Separate non-transactional migration and metadata upgrade journeys, locks, partial failure/recovery, and selected TLS checks. |
+| SQLite | Bundled through `rusqlite 0.40.2` as SQLite 3.53.2 by default; SQLite 3.54.1 was linked for the 2026-11-07 local suite | Default automated suite covers transactional migrations, rollback, metadata, and recovery. The full suite also passed against official SQLite 3.54.1 using a local `pkg-config` override; this does not change the runtime bundled in normal builds. No external server required. |
+| PostgreSQL | 16.15, 17.11, 18.6 | CLI and adapter integration, metadata v3/v4 inspection and explicit v3→v5/v4→v5 upgrades, TLS checks, session locks, transactional migrations, supported concurrent-index reconciliation, and runner interactions. Focused recovery tests passed on 16.15 and 18.6; the complete fault matrix remains pending. |
+| MySQL | 8.4.11; 8.4.13 and 9.7.4 (focused recovery drills only) | 8.4.11: non-transactional migration journey, per-statement journal, locks, partial failure, process interruption, explicit reconciliation, TLS checks, and metadata upgrades. 8.4.13 and 9.7.4: focused recovery journey and partial-failure cases. |
+| MariaDB | 10.11.14, 11.4.13, 11.8.2; 11.8.9 and 13.0.2 (focused recovery drills only) | Earlier versions: non-transactional migration and metadata upgrade journeys, locks, partial failure/recovery, and selected TLS checks. 11.8.9 and 13.0.2: focused recovery journey and partial-failure cases. |
 
 MySQL/MariaDB migrations must declare `transaction = never`; their DDL can
 commit implicitly. PostgreSQL and SQLite support transactional migrations.

@@ -9,10 +9,11 @@ one plan; these APIs are provisional and have no compatibility guarantee.
 PostgreSQL `up`/`down` supports
 transactional migrations and a restricted concurrent-index operation on
 metadata format 5.
-MySQL 8.4 and MariaDB 10.11, 11.4, and 11.8 have passed the current opt-in
-integration matrix; these servers execute only explicitly non-transactional
-(`transaction = never`) SQL migrations. PostgreSQL 16, 17, and 18 have passed
-the current opt-in integration matrix. The complete V1 in the
+The broad opt-in integration matrix covers MySQL 8.4 and MariaDB 10.11, 11.4,
+and 11.8; focused recovery drills also passed on MySQL 9.7.4 and MariaDB 13.0.2.
+These servers execute only explicitly non-transactional (`transaction = never`)
+SQL migrations. PostgreSQL 16, 17, and 18 have passed the current opt-in
+integration matrix. The complete V1 in the
 [development plan](docs/database-migrator-rust-plano-desenvolvimento.md) is not
 implemented yet. The library API and metadata schemas are provisional; no
 compatibility guarantee is offered yet.
@@ -107,9 +108,10 @@ format.
 The session-bound `GET_LOCK` lock is released before the command returns; loss
 of a response leaves the run indeterminate and blocks further writes until
 explicit, approved reconciliation. A repair plan does not execute or retry SQL.
-MySQL 8.4 and MariaDB 10.11, 11.4, and 11.8 passed the local opt-in F5 matrix;
-MySQL 8.4 and MariaDB 10.11 also passed the TLS CA and hostname checks. This
-intermediate support is provisional and is not a V1 or production-readiness
+MySQL 8.4 and MariaDB 10.11, 11.4, and 11.8 passed the broad local opt-in F5
+matrix; focused recovery drills also passed on MySQL 9.7.4 and MariaDB 13.0.2.
+MySQL 8.4 and MariaDB 10.11 also passed the TLS CA and hostname checks. These
+results remain provisional and are not a complete V1 or production-readiness
 claim.
 
 MySQL/MariaDB connections require TLS with certificate-chain and hostname
@@ -416,7 +418,7 @@ PostgreSQL tests use `DBM_TEST_DATABASE_URL`; plaintext lock/snapshot and CLI
 tests require `sslmode=disable`, while the TLS test also requires
 `DBM_TEST_POSTGRES_CA_FILE` and a matching local certificate. The PgBouncer test
 uses `DBM_TEST_PGBOUNCER_URL` through transaction pooling with at least two
-server connections. MySQL 8.4 and MariaDB tests use `DBM_TEST_MYSQL_URL` and
+server connections. MySQL and MariaDB tests use `DBM_TEST_MYSQL_URL` and
 `DBM_TEST_MARIADB_URL`, respectively; their test account must be able to create
 and drop a uniquely named database on that loopback instance. TLS checks use
 `DBM_TEST_MYSQL_TLS_URL` with `DBM_TEST_MYSQL_CA_FILE`, and
