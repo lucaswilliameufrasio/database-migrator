@@ -1346,17 +1346,20 @@ loopback: PostgreSQL 16.15 e 18.6; MySQL 8.4.11, 8.4.13 e 9.7.4; MariaDB 11.8.2,
 11.8.9 e 13.0.2. Passaram a perda de sessão PostgreSQL durante DDL transacional,
 a falha/reconciliação de índice concorrente PostgreSQL e as jornadas CLI
 MySQL/MariaDB com falhas no segundo/terceiro statement e interrupção durante
-execução. A suíte completa do workspace também passou contra SQLite 3.54.1
-compilado localmente e selecionado via `pkg-config`; o binário padrão ainda
-empacota SQLite 3.53.2 de `rusqlite`. A primeira execução MySQL encontrou uma
-expectativa antiga de metadata v3; `tests/cli.rs` foi atualizado para v5,
-conforme a inicialização atual, e as jornadas passaram após a correção. As
-versões estáveis mais recentes foram conferidas nas notas oficiais. Evidência e
-limites por cenário estão em `docs/recovery-drills.md`. Isso fecha somente esses
-exercícios: a matriz de 12 cenários continua incompleta, incluindo concorrência
-de outra instância no PostgreSQL; o relatório de segurança, quatro validações
-pendentes e baseline de performance ainda não foram concluídos. G11 permanece
-pendente e G12 continua sem autorização de release.
+execução. O teste de perda de sessão PostgreSQL também tenta uma segunda
+migração no schema isolado; ela foi bloqueada sem criar outro run em duas
+execuções cada nas versões 16.15 e 18.6. A suíte completa do workspace também
+passou contra SQLite 3.54.1 compilado localmente e selecionado via `pkg-config`;
+o binário padrão continua empacotando SQLite 3.53.2 de `rusqlite`. A primeira
+execução MySQL encontrou uma expectativa antiga de metadata v3; `tests/cli.rs`
+foi atualizado para v5, conforme a inicialização atual, e as jornadas passaram
+após a correção. As versões estáveis mais recentes foram conferidas nas notas
+oficiais. Evidência e limites por cenário estão em `docs/recovery-drills.md`.
+Isso fecha somente esses exercícios: a matriz de 12 cenários continua
+incompleta, com outros limites de
+concorrência e boundaries de falha sem validação; o relatório de segurança,
+quatro validações pendentes e baseline de performance ainda não foram
+concluídos. G11 permanece pendente e G12 continua sem autorização de release.
 
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 

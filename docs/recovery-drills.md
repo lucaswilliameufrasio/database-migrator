@@ -43,7 +43,7 @@ section 13.3. Current source evidence is narrower than the complete matrix:
 | Process killed during SQLite transactional SQL | `tests/cli.rs::killing_cli_during_a_transaction_keeps_the_next_write_blocked` checks transactional rollback, retained diagnostic lock, and blocked writes | Covered locally by the default CLI test suite |
 | MySQL process killed during a non-transactional statement | `tests/cli.rs::cli_runs_mysql_nontransactional_migration_and_recovery_journey` kills the CLI during `SELECT SLEEP`, checks the unresolved run and released session lock, verifies a new writer is blocked, then reconciles explicitly | Passed twice each on disposable loopback MySQL 8.4.11, 8.4.13, and 9.7.4 on 2026-11-07 |
 | MySQL/MariaDB failures after earlier DDL steps | The non-transactional CLI journeys inject failures at the second and third statement and inspect partial effects before reconciliation | Passed twice each on MySQL 8.4.11/8.4.13/9.7.4 and MariaDB 11.8.2/11.8.9/13.0.2 on 2026-11-07 |
-| PostgreSQL migration-session loss during transactional DDL | `src/engine.rs::tests::local_postgres_session_loss_during_fsm_ddl_is_not_retried` terminates the backend while a scoped DDL trigger pauses execution and inspects durable state | Passed twice each on disposable loopback PostgreSQL 16.15 and 18.6 on 2026-11-07 |
+| PostgreSQL migration-session loss during transactional DDL | `src/engine.rs::tests::local_postgres_session_loss_during_fsm_ddl_blocks_competing_writer` terminates the backend while a scoped DDL trigger pauses execution, inspects durable state, and attempts a second migration through the real engine | Passed twice each on disposable loopback PostgreSQL 16.15 and 18.6 on 2026-11-07; competing write was rejected without creating a second run |
 | PostgreSQL failed non-transactional concurrent-index migration | `src/engine.rs::tests::local_postgres_nontransactional_failure_is_journaled_indeterminate` checks the indeterminate journal and catalog-gated explicit reconciliation | Passed twice each on disposable loopback PostgreSQL 16.15 and 18.6 on 2026-11-07 |
 | Runner absent, incompatible, timed out, or emitting extra frames | `tests/runner_protocol.rs::missing_runner_timeout_and_extra_frames_fail_without_partial_sql` and adjacent handshake tests | Covered locally; timeout test uses a disposable project |
 | All twelve crash boundaries, shared-schema namespace races, every metadata bootstrap/upgrade boundary, and rollback crash windows | No complete, repeatable matrix is currently recorded. The repository-wide source-only security review on 2026-10-26 did not execute target code or add fault-injection evidence. | Pending; G11 is not approved |
@@ -62,7 +62,7 @@ proves a whole scenario across every database and failure boundary.
 | 4 | SQL completed, death before acknowledgement | No targeted kill-boundary evidence identified; pending. |
 | 5 | Acknowledgement persisted, death before final state | No targeted kill-boundary evidence identified; pending. |
 | 6 | MySQL/MariaDB partial DDL, third step fails | Second- and third-statement partial-failure journeys passed twice each on MySQL 8.4.11/8.4.13/9.7.4 and MariaDB 11.8.2/11.8.9/13.0.2; earlier DDL effects were inspected and reconciled explicitly. Other server versions remain unverified. |
-| 7 | Native-lock session loss and competing instance | PostgreSQL 16.15/18.6 session-loss-during-DDL tests passed twice each and confirmed durable diagnostic state/no automatic retry. A competing writer at this exact boundary remains unverified. |
+| 7 | Native-lock session loss and competing instance | `local_postgres_session_loss_during_fsm_ddl_blocks_competing_writer` attempts a competing engine migration after terminating the original backend. The competing migration was rejected and the started run, observed-active diagnostic lock, and empty transactional journal remained unchanged in two runs each on PostgreSQL 16.15/18.6. Other lock-loss boundaries and server versions remain unverified. |
 | 8 | Two CLIs, same DB and namespace | No targeted two-CLI fault-matrix evidence identified; pending. |
 | 9 | Two namespaces sharing schema object | No targeted race evidence identified; pending. |
 | 10 | Failure during metadata bootstrap/upgrade | No complete injected-failure boundary evidence identified; pending. |
@@ -75,8 +75,9 @@ a disposable SQLite database, kills a CLI after observing a started run and
 writer lock, checks the transaction's schema effects were rolled back and the
 run/diagnostic lock remained, and checks a subsequent `up` returns
 `SAFETY_BLOCKED`. It does not prove the other databases or exact completion
-boundaries. The same log explicitly marks
-`local_postgres_session_loss_during_fsm_ddl_is_not_retried`,
+boundaries. The same log explicitly marks the then-named
+`local_postgres_session_loss_during_fsm_ddl_is_not_retried` test (since extended
+and renamed to `local_postgres_session_loss_during_fsm_ddl_blocks_competing_writer`),
 `cli_runs_mysql_nontransactional_migration_and_recovery_journey`, and
 `cli_runs_mariadb_nontransactional_migration_and_recovery_journey` ignored at
 that time. Log: `/mnt/storage/projects/.scratch/dbm-fuzz-20261029/attempt-02/logs/tests.log`.
@@ -126,6 +127,16 @@ and [SQLite 3.54.1](https://sqlite.org/changes.html). All external servers were
 disposable rootless-Docker instances bound only to loopback and removed with
 their anonymous volumes after the runs. This focused evidence does not complete
 the broader per-engine integration matrices or G11.
+
+**Competing-writer boundary — 2026-11-07:** after extending the PostgreSQL
+transactional session-loss test to attempt a second `run_adapter_migration`, the
+test passed twice each on disposable loopback PostgreSQL 16.15 and 18.6. The
+original backend loss released the native lock; the competing writer acquired
+the lock, observed the unresolved `started` run/`observed_active` lock metadata,
+and returned `DbmError::Safety` without adding a run, applied row, or step. This
+closes only the competing-writer check at this specific boundary; the other
+matrix gaps listed above remain pending. Both disposable containers were
+stopped and removed.
 
 The opt-in database tests are ignored by default. Use only the test variables
 and disposable loopback database instances documented in the README; never run

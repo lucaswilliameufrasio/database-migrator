@@ -5304,7 +5304,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires DBM_TEST_DATABASE_URL for a disposable loopback PostgreSQL instance"]
-    async fn local_postgres_session_loss_during_fsm_ddl_is_not_retried() {
+    async fn local_postgres_session_loss_during_fsm_ddl_blocks_competing_writer() {
         use std::net::IpAddr;
 
         use tokio_postgres::config::{Config as PostgresConfig, Host, SslMode};
@@ -5489,6 +5489,47 @@ mod tests {
             .read_snapshot(&config.config.namespace)
             .await
             .expect("read durable metadata after migration-session loss");
+
+        let mut competing_session = adapter
+            .connect(&config, SessionIntent::ReadWrite)
+            .await
+            .expect("connect competing migration session");
+        competing_session
+            .begin()
+            .await
+            .expect("begin competing session search-path setup");
+        competing_session
+            .execute_statement(&format!("SET search_path TO {schema}, public"))
+            .await
+            .expect("set competing session search path");
+        competing_session
+            .commit()
+            .await
+            .expect("commit competing session search path");
+        let competing_batch_id = uuid::Uuid::new_v4().to_string();
+        let competing_write = run_adapter_migration(
+            &config,
+            competing_session.as_mut(),
+            &migrations,
+            None,
+            MigrationOperation {
+                migration: &migrations[0],
+                initial_manifest: &manifest,
+                batch_id: &competing_batch_id,
+                plan_hash: &initial_plan.plan_hash,
+                direction: "up",
+            },
+        )
+        .await;
+        competing_session
+            .close()
+            .await
+            .expect("close competing migration session");
+        let after_competing_write = observer
+            .read_snapshot(&config.config.namespace)
+            .await
+            .expect("verify competing writer did not change durable metadata");
+
         observer
             .begin()
             .await
@@ -5522,6 +5563,10 @@ mod tests {
             execution,
             Err(DbmError::ReconciliationRequired(_))
         ));
+        assert!(
+            matches!(competing_write, Err(DbmError::Safety(_))),
+            "a competing writer must be blocked by the unresolved run: {competing_write:?}"
+        );
         assert_eq!(observed.applied.len(), 0);
         assert_eq!(observed.runs.len(), 1);
         assert_eq!(observed.runs[0].state, "started");
@@ -5531,6 +5576,17 @@ mod tests {
         );
         assert_eq!(
             observed.lock.as_ref().map(|lock| lock.state.as_str()),
+            Some("observed_active")
+        );
+        assert_eq!(after_competing_write.applied.len(), 0);
+        assert_eq!(after_competing_write.runs.len(), 1);
+        assert_eq!(after_competing_write.runs[0].state, "started");
+        assert!(after_competing_write.steps.is_empty());
+        assert_eq!(
+            after_competing_write
+                .lock
+                .as_ref()
+                .map(|lock| lock.state.as_str()),
             Some("observed_active")
         );
     }
