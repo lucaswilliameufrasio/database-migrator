@@ -417,10 +417,10 @@ After that test change, formatting, `git diff --check`, Clippy, the full
 all-features workspace tests, build, both documented SQLite examples, and
 `sh scripts/supply-chain.sh` passed. The supply-chain check emitted only the
 existing non-failing duplicate-version and unused-license-allowance warnings;
-advisories, bans, licenses, and source checks passed. The four external
-`needs_validation` records, separate security assessment, CI-reference-hardware
-performance result, and reusable approved-plan CLI decision remain unresolved;
-G11 is still pending.
+advisories, bans, licenses, and source checks passed. At that point the separate
+security assessment and performance baseline were still outstanding. The later
+owner decision made the existing engine-level check the accepted #12 criterion;
+the subsequent remote baseline and remaining G11 blockers are recorded below.
 
 **Additional MySQL-family version coverage — 2026-11-07:** the MySQL-focused
 ignored workspace suite passed 14 tests each on disposable MySQL 8.4.11 and
@@ -524,7 +524,26 @@ default run. G11 remains partial: the complete security review and remaining
 adapter/version/failure-boundary matrix still require evidence, and the external
 assessment/candidate records remain unavailable and uncorroborated.
 
-These new results are local to the uncommitted worktree based on `ced16a5`; no
-remote workflow has run against this exact SQLite fix and documentation diff.
-The prior CI evidence above remains tied to its recorded commit SHAs and must not
-be treated as validation of these local changes.
+**Remote CI for the SQLite fix — 2026-11-08:** push commit
+`15b722ea5c871fae73ee40078bbeee28101fa62c` passed all three jobs in [workflow
+run 42534997418](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42534997418):
+quality (2m46s), supply-chain (6m05s), and the informational performance job
+(2m33s). The quality job passed format, Clippy, the default workspace suite,
+build, and both executable examples; its default suite left 49 opt-in database
+tests ignored. Supply-chain passed audits and CycloneDX generation/upload; it
+reported duplicate-version warnings, with no advisory, ban, license, or source
+failure. The retained artifact is
+`database-migrator-sbom-15b722ea5c871fae73ee40078bbeee28101fa62c`, 35,986 bytes,
+SHA-256 `94d7bdbc2f6fe14bfd9734466bbc88e7b1dea6b7d921bf5e222caef46daad1a1`,
+with 30-day retention.
+
+The performance job used `ubuntu24` image `20261101.360.1` (Linux x86_64,
+kernel `7.0.0-1017-azure`, AMD EPYC 7763), Rust/Cargo 1.99.1, and a release
+binary. After one warm-up, the 10 read-only `validate` samples for 1,000
+migrations were 17, 18, 18, 17, 17, 16, 17, 17, 17, and 17 ms (median 17 ms,
+maximum 18 ms); the harness also checked the migration count and absence of a
+created SQLite database. This satisfies the initial sub-second target on this
+runner campaign, but remains informational, not a regression threshold, and
+does not establish variance across runners. G11 remains partial: the complete
+security review/external records and remaining applicable adapter/version/
+failure-boundary evidence are still open.

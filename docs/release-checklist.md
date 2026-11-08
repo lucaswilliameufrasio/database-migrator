@@ -21,6 +21,12 @@ publishing a package, uploading release assets, or running database migrations.
   sandbox. No additional defect was confirmed in that limited pass, which does
   not satisfy the complete security-review requirement above; the G11 checkbox
   remains open.
+- Commit `15b722ea5c871fae73ee40078bbeee28101fa62c` passed quality,
+  supply-chain/SBOM, and performance in CI run
+  [42534997418](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42534997418).
+  This verifies those gates for that SHA; it does not close the complete security
+  review or remaining fault-injection matrix, so the combined G11 checkbox stays
+  open.
 - [x] Draft changelog, upgrade guide, support matrix, and release checklist
       prepared.
 - [x] CI configuration for dependency audit and ephemeral CycloneDX SBOM

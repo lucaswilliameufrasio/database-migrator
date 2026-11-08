@@ -1655,9 +1655,22 @@ de licença não usadas. Os testes de banco ignorados não foram exercitados por
 essa suíte padrão. A revisão de segurança completa e as lacunas restantes da
 matriz seguem pendentes; G11 permanece parcial, sem declarar ausência de issues
 críticas.
-Esses resultados são locais ao worktree não commitado baseado em `ced16a5`; não
-houve workflow remoto para este diff. Os resultados CI citados acima continuam
-vinculados aos SHAs registrados e não validam esta alteração local.
+O commit `15b722ea5c871fae73ee40078bbeee28101fa62c` passou quality (2m46s),
+supply-chain (6m05s) e performance informativa (2m33s) na execução CI
+[42534997418](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42534997418).
+O quality job executou format, Clippy, testes padrão, build e os exemplos; 49
+testes opt-in de banco permaneceram ignorados. O job de supply-chain passou
+auditorias e upload CycloneDX. O artefato
+`database-migrator-sbom-15b722ea5c871fae73ee40078bbeee28101fa62c` tem 35.986
+bytes, SHA-256 `94d7bdbc2f6fe14bfd9734466bbc88e7b1dea6b7d921bf5e222caef46daad1a1`
+e retenção de 30 dias. Na medição de performance, runner `ubuntu24`
+`20261101.360.1`, AMD EPYC 7763, Rust/Cargo 1.99.1, release e 1.000 migrations,
+as dez amostras foram 17, 18, 18, 17, 17, 16, 17, 17, 17 e 17 ms; mediana 17
+ms, máximo 18 ms. O harness confirmou validação read-only e ausência de criação
+do banco SQLite. A campanha atende ao objetivo inicial de menos de um segundo
+nesse runner, sem estabelecer variação entre runners ou um gate de regressão.
+G11 continua parcial pela revisão de segurança identificável/completa e pelas
+lacunas restantes da matriz.
 
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 
