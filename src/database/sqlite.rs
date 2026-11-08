@@ -943,6 +943,14 @@ fn classify_managed_sql_error(error: rusqlite::Error) -> DbmError {
             "SQLite rejected a managed migration statement with extended result code {}",
             failure.extended_code
         )),
+        rusqlite::Error::SqlInputError { error, offset, .. } => {
+            DbmError::Database(rusqlite::Error::SqlInputError {
+                error,
+                msg: "SQLite rejected SQL input".to_owned(),
+                sql: "<redacted>".to_owned(),
+                offset,
+            })
+        }
         other => DbmError::Database(other),
     }
 }

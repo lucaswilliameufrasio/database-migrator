@@ -396,6 +396,14 @@ candidate records. This does not establish that they are absent from other
 storage. Their content and status remain unverified until their owner provides
 an accessible path or copy.
 
+**Provenance clarification — 2026-11-08:** the project owner did not recognize
+the separate report described by the historical documentation. The statement
+that four candidate records exist is therefore retained only as an
+uncorroborated historical reference, not as evidence that findings were
+confirmed or that the owner has those records. No candidate was independently
+validated here. The release checklist's requirement for an identifiable,
+complete security review remains open; do not claim “no critical issues.”
+
 **MySQL/MariaDB transaction-policy regression and full local gate — 2026-11-08:**
 `source::tests::mysql_migrations_require_explicit_never_and_match_the_target_dialect`
 now asserts that both an omitted policy and explicit `transaction=always` are
@@ -452,8 +460,71 @@ campaign met the initial one-second objective, but the job is informational and
 does not enforce a threshold; one run does not characterize variance across
 runner images. See the [CI run](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42528280279).
 
+The follow-up run `42529361917` on commit
+`ced16a526db2809ef94b0d13a82d45b764b7e517` also passed quality, supply-chain,
+and performance jobs and uploaded the commit-specific SBOM
+`database-migrator-sbom-ced16a526db2809ef94b0d13a82d45b764b7e517` (artifact
+metadata reports 35,986 bytes and 30-day retention). It used the same recorded
+`ubuntu24` image, CPU model, kernel, and Rust/Cargo versions as the first run.
+Its ten post-warm-up samples were all 14 ms (median and maximum 14 ms). Across
+both independent hosted-runner campaigns, the combined median is 14.5 ms and
+maximum 17 ms; the campaign medians differ by 1 ms. This strengthens
+repeatability on the same runner image/hardware model, but does not establish
+variance across images or a hard performance gate. See the [second CI run](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42529361917).
+
 The historical security-review note above refers to a source-only review recorded at commit
 `9a8dd95c3143fe9adc59f1c51fba820ad05db129`; its full report and four structured
 `needs_validation` records are said to be maintained outside this repository
 and were not available in the inspected checkout. Their candidate validations
 remain unverified. G11 is still partial/pending.
+
+**Focused SQLite error-disclosure review and local gate — 2026-11-08:** inspection
+of locked `rusqlite 0.40.2` confirmed that `SqlInputError::Display` includes its
+SQL input. The SQLite adapter's managed-statement error path could therefore
+surface migration SQL through CLI errors; the sync engine path also formatted
+the raw SQLite error. Both paths now emit only a generic rejection and safe
+error classification. The async adapter reconstructs `SqlInputError` with a
+generic diagnostic and `sql = "<redacted>"`, retaining the `DbmError::Database`
+classification, SQLite error value and offset. A sentinel regression checks
+sync/async returned errors and persisted history; it also asserts the async
+database-error class. The namespace-collision CLI regression passed with its
+existing `DATABASE_ERROR` and exit-code-10 contract. This is a focused review of
+these SQLite error-reporting paths, not a complete security audit, and it does
+not validate the inaccessible external assessment or its uncorroborated
+candidate references. No claim of “no critical issues” is made.
+
+The accompanying bounded source pass inspected `config.rs`/`source.rs` path
+resolution, `runner.rs` process and frame handling, `ai.rs` context/provider
+handling, CLI error serialization, and the PostgreSQL/MySQL connection setup.
+It observed project-root checks for configured paths, migration-symlink
+rejection, an allowlisted runner environment, a 4 MiB framed protocol, and
+timeout handling. The runner remains trusted project code with the caller's
+process permissions, not a sandbox; stopping the direct child does not establish
+termination of any descendants. This is an explicit boundary in ADR-018 and the
+threat model, so hostile runner binaries must not be treated as isolated. AI
+requests are explicit, use a configured HTTPS (or loopback HTTP) endpoint, do
+not follow redirects, and bound context/response sizes; the local redaction
+heuristic is not a guarantee that arbitrary source text contains no secrets,
+and selected migration content is sent to that configured provider. The database
+adapters reject invalid connection settings without echoing connection values
+and enforce TLS validation by default for remote targets, with narrowly scoped
+local plaintext opt-ins. No additional confirmed defect was established in this
+bounded read-through; these observations do not establish absence of other
+issues, provide independent severity triage, or replace a complete review.
+
+After the correction, the local gate passed `cargo fmt --all -- --check`,
+Clippy with `-D warnings`, `cargo test --workspace --all-features --locked`
+(144 passed, 49 ignored, zero failures), the all-features workspace build, both
+documented SQLite examples, and `sh scripts/supply-chain.sh`. The supply-chain
+script validated the generated CycloneDX BOM and both dependency graphs against
+1,422 RustSec advisories; advisories, bans, licenses and sources passed. It
+reported non-failing duplicate-version warnings and unused license allowances.
+The full suite's ignored database integrations were not exercised by this
+default run. G11 remains partial: the complete security review and remaining
+adapter/version/failure-boundary matrix still require evidence, and the external
+assessment/candidate records remain unavailable and uncorroborated.
+
+These new results are local to the uncommitted worktree based on `ced16a5`; no
+remote workflow has run against this exact SQLite fix and documentation diff.
+The prior CI evidence above remains tied to its recorded commit SHAs and must not
+be treated as validation of these local changes.

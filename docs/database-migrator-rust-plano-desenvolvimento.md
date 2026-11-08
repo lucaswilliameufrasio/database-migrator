@@ -1613,12 +1613,51 @@ de qualidade e supply chain. A execução `42528280279` no commit
 `7.0.0-1017-azure`, AMD EPYC 7763), com `rustc`/Cargo 1.99.1 e build release, o
 harness fez um warm-up e dez medições: 15, 15, 15, 15, 15, 15, 17, 16, 15 e 15
 ms. Mediana 15 ms, máximo 17 ms, incluindo startup do processo; o harness
-confirmou 1.000 migrations e ausência de criação do banco SQLite. Isso satisfaz
-o objetivo inicial de menos de um segundo nesta campanha, mas o job permanece
-informativo, não um gate de regressão, e uma campanha não caracteriza variação
-entre imagens/runners. Log: [CI 42528280279](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42528280279).
-G11 continua pendente pelas lacunas de segurança, validações externas e matriz
-restante.
+confirmou 1.000 migrations e ausência de criação do banco SQLite. A segunda
+execução, `42529361917` no commit
+`ced16a526db2809ef94b0d13a82d45b764b7e517`, também passou quality,
+supply-chain e performance. No mesmo tipo de runner/imagem/CPU e toolchain, as
+dez amostras foram 14 ms; mediana e máximo 14 ms. Na união das 20 amostras, a
+mediana é 14,5 ms e o máximo 17 ms; as medianas por campanha diferem 1 ms. As
+duas campanhas atendem ao objetivo inicial de menos de um segundo. Isso fortalece
+a repetibilidade na imagem observada, sem caracterizar variação entre imagens,
+tipos de CPU ou runners e sem tornar o job um gate de regressão. Logs: [CI
+42528280279](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42528280279)
+e [CI
+42529361917](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42529361917).
+G11 continua pendente pela revisão de segurança identificável e completa e pelas
+lacunas restantes da matriz; a antiga referência externa de quatro candidatos
+não é corroborável no checkout nem reconhecida pelo responsável.
+
+**Revisão focal de erro SQLite e gate local — 2026-11-08:** a inspeção do
+`rusqlite 0.40.2` bloqueado confirmou que `SqlInputError::Display` inclui o SQL
+recebido. O caminho de erro do adapter poderia expor o texto da migration, e o
+caminho síncrono também formatava o erro cru. Ambos agora usam diagnóstico
+genérico; o adapter reconstrói `SqlInputError` com SQL redigido e preserva a
+classe `DbmError::Database`, o erro SQLite e o offset. O teste sentinela verifica
+mensagens e histórico sync/async e a classe do erro; a regressão CLI de colisão
+mantém `DATABASE_ERROR`/exit 10. A revisão do achado é limitada a esses caminhos,
+não é uma auditoria completa nem valida o relatório externo não acessível. Uma
+leitura estática adicional cobriu resolução de paths, runner/protocolo, contexto
+e provider AI, serialização de erros CLI e conexões PostgreSQL/MySQL. Ela
+confirmou controles documentados e não estabeleceu outro defeito nesse escopo
+limitado; runner compilado permanece código confiável com privilégios do
+processo, não sandbox, e a heurística de redaction AI não garante ausência de
+segredos em todo texto selecionado. Escopo, observações e limites estão em
+`docs/supply-chain.md`; isso não substitui auditoria independente/completa.
+
+Após a correção passaram formatação, Clippy (`-D warnings`), suíte completa
+(144 passed, 49 ignored, zero falhas; dois testes de runner levaram 178,29 s),
+build, os dois exemplos SQLite e `sh scripts/supply-chain.sh`. O script validou o
+SBOM CycloneDX e os dois grafos de dependências; advisories, bans, licenses e
+sources passaram, com avisos não bloqueantes de versões duplicadas e allowances
+de licença não usadas. Os testes de banco ignorados não foram exercitados por
+essa suíte padrão. A revisão de segurança completa e as lacunas restantes da
+matriz seguem pendentes; G11 permanece parcial, sem declarar ausência de issues
+críticas.
+Esses resultados são locais ao worktree não commitado baseado em `ced16a5`; não
+houve workflow remoto para este diff. Os resultados CI citados acima continuam
+vinculados aos SHAs registrados e não validam esta alteração local.
 
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 

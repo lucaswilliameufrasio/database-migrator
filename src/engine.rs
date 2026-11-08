@@ -4366,9 +4366,10 @@ fn execute_one_in_transaction(
                 Some("SQLite returned an error; managed transaction will roll back".to_owned());
             steps.push(attempt);
             return Err(DbmError::Execution(format!(
-                "migration {} {direction} failed at SQL step {}: {error}",
+                "migration {} {direction} failed at SQL step {} ({}); SQLite rejected the statement",
                 migration.identity.version,
-                index + 1
+                index + 1,
+                sqlite_error_code(&error),
             )));
         }
 
@@ -5056,6 +5057,48 @@ mod tests {
             )
             .expect("query rolled-back table");
         assert_eq!(table_count, 0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn sqlite_migration_sql_is_not_echoed_in_errors_or_history() {
+        let secret_marker = "DBM_SQL_REDACTION_SENTINEL_TEST_ONLY";
+
+        let (_async_directory, async_config) = setup();
+        write_migration(
+            &async_config,
+            "20261021162643981234_async_invalid_sql.sql",
+            &format!("-- dbm:up\nSELECT '{secret_marker}' FROM;\n"),
+        );
+        let async_error = up_async(&async_config)
+            .await
+            .expect_err("invalid async SQLite migration is rejected");
+        assert!(matches!(&async_error, DbmError::Database(_)));
+        assert!(!async_error.to_string().contains(secret_marker));
+        let async_snapshot = read_snapshot(&async_config).expect("read async failure history");
+        assert_eq!(async_snapshot.runs.len(), 1);
+        assert!(
+            async_snapshot.runs[0]
+                .error_summary_redacted
+                .as_deref()
+                .is_none_or(|summary| !summary.contains(secret_marker))
+        );
+
+        let (_sync_directory, sync_config) = setup();
+        write_migration(
+            &sync_config,
+            "20261021162643981234_sync_invalid_sql.sql",
+            &format!("-- dbm:up\nSELECT '{secret_marker}' FROM;\n"),
+        );
+        let sync_error = up(&sync_config).expect_err("invalid sync SQLite migration is rejected");
+        assert!(!sync_error.to_string().contains(secret_marker));
+        let sync_history = history(&sync_config).expect("read sync failure history");
+        assert_eq!(sync_history.runs.len(), 1);
+        assert!(
+            sync_history.runs[0]
+                .error_summary_redacted
+                .as_deref()
+                .is_none_or(|summary| !summary.contains(secret_marker))
+        );
     }
 
     #[tokio::test]

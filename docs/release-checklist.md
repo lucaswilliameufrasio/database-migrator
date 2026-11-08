@@ -5,11 +5,22 @@ publishing a package, uploading release assets, or running database migrations.
 
 ## Current gate status
 
-- A repository-wide source-only security review was recorded on 2026-10-26 at
-  commit `9a8dd95c3143fe9adc59f1c51fba820ad05db129`: four unique candidates
-  remain `needs_validation`, two hypotheses were rejected, one supply-chain
-  unit is blocked, and no candidate was confirmed. No target code was run; this
-  is not a “no critical issues” claim and does not satisfy G11.
+- Repository documentation records a source-only security review at commit
+  `9a8dd95c3143fe9adc59f1c51fba820ad05db129`, but its report and structured
+  findings are not available in the inspected repository or accessible GitHub
+  records. The project owner did not recognize the separate report described
+  by that documentation. The claimed four `needs_validation` candidates and
+  other counts are therefore uncorroborated historical references, not
+  independently verifiable findings. Do not infer “no critical issues”; a
+  complete, identifiable review remains required for G11.
+- A focused review on 2026-11-08 found and fixed SQLite migration-SQL disclosure
+  through `SqlInputError` formatting. Sync/async redaction and error-class
+  regressions passed locally. A bounded read-through also inspected path,
+  runner, AI/provider, CLI error, and database-connection boundaries; it
+  reaffirmed that compiled runners are trusted process-level code, not a
+  sandbox. No additional defect was confirmed in that limited pass, which does
+  not satisfy the complete security-review requirement above; the G11 checkbox
+  remains open.
 - [x] Draft changelog, upgrade guide, support matrix, and release checklist
       prepared.
 - [x] CI configuration for dependency audit and ephemeral CycloneDX SBOM
