@@ -1061,6 +1061,72 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn sqlite_metadata_bootstrap_failure_rolls_back_partial_tables() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let config_path = directory.path().join("dbm.toml");
+        config::initialize(&config_path).expect("initialize test project");
+        let config = config::load(&config_path).expect("load test config");
+        let database_path = config
+            .sqlite_database_path()
+            .expect("SQLite database path")
+            .to_owned();
+        let conflict_index = "schema_migration_runs_namespace_created_idx";
+        let setup = rusqlite::Connection::open(&database_path)
+            .expect("open disposable SQLite target for bootstrap fault");
+        setup
+            .execute(
+                "CREATE TABLE schema_migration_runs_namespace_created_idx (collision INTEGER)",
+                [],
+            )
+            .expect("create object colliding with a later bootstrap index");
+        drop(setup);
+
+        let mut session = SqliteAdapter
+            .connect(&config, SessionIntent::ReadWrite)
+            .await
+            .expect("connect mutable SQLite session");
+        session
+            .begin()
+            .await
+            .expect("begin SQLite bootstrap transaction");
+        let bootstrap_error = session
+            .initialize_metadata("2026-10-24T12:00:00Z")
+            .await
+            .expect_err("colliding index must fail bootstrap after table creation");
+        assert!(
+            bootstrap_error.to_string().contains(conflict_index),
+            "unexpected bootstrap failure: {bootstrap_error}"
+        );
+        session
+            .rollback()
+            .await
+            .expect("roll back partial SQLite metadata bootstrap");
+        session.close().await.expect("close SQLite session");
+
+        let inspection = rusqlite::Connection::open(&database_path)
+            .expect("reopen SQLite target after bootstrap rollback");
+        assert_eq!(
+            crate::storage::metadata_presence(&inspection)
+                .expect("count core metadata tables after rollback"),
+            0
+        );
+        assert_eq!(
+            crate::storage::metadata_v4_presence(&inspection)
+                .expect("count all current metadata tables after rollback"),
+            0
+        );
+        let conflict_preserved: bool = inspection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM main.sqlite_master \
+                 WHERE type = 'table' AND name = ?1)",
+                [conflict_index],
+                |row| row.get(0),
+            )
+            .expect("verify pre-existing colliding object remains");
+        assert!(conflict_preserved);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn sqlite_metadata_bootstrap_requires_and_uses_the_writer_transaction() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let config_path = directory.path().join("dbm.toml");

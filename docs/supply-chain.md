@@ -198,6 +198,38 @@ Both runs used nightly rustc 1.101.0-nightly (commit `41089d07a0a2`, LLVM
 after 301 seconds despite the 300-second setting; a 330-second external timeout
 bounded each execution. These bounded runs are not a proof of parser correctness.
 
+**Both targets with retained corpus — 2026-11-07:** from commit `abb5aeb`, the
+rootless, network-disabled sandbox passed preflight and fuzz build, then ran
+`sql_scanner` for 301 seconds (2,309,020 executions, peak RSS 569 MiB) and
+`migration_parser` for 301 seconds (2,404,475 executions, peak RSS 578 MiB), with
+`-max_total_time=300 -max_len=65536 -timeout=10 -rss_limit_mb=2048`. Both targets
+and their evidence collection exited 0; neither reported a crash artifact. The
+generated corpora were retained: `sql_scanner` has 1,039 files/149,610 bytes
+(aggregate SHA-256
+`e40bf6e42abed9353e4358ce67ebb070b81cac4ec918e557d173b14de573c875`), and
+`migration_parser` has 1,479 files/146,942 bytes (aggregate SHA-256
+`28ec4325a1698e3fdc07888eee99a44a0919a0a923a29d1d130215f6fd639f5e`). No crash
+artifacts were present in either bounded output directory.
+
+Controls were verified from container metadata: rootless Docker, network mode
+`none`, read-only root and source/toolchain/vendor mounts, all capabilities
+dropped, `no-new-privileges`, 2 CPUs, 4 GiB memory with no swap, and 128 PIDs.
+The container was removed after collection. The 41-file input manifest and
+per-file corpus hashes are under
+`/mnt/storage/projects/.scratch/dbm-fuzz-20261107/attempt-01/`; the retained
+evidence manifest SHA-256 is
+`48cf8ebafa9e4b65314bfdf44a28655ae41ed785e256b318a9e198baea349f32`. After
+manifest capture, changes in the mounted checkout are confined to `cfg(test)`
+code in `src/database/sqlite.rs`, `src/engine.rs`, and `src/storage.rs`, plus CLI
+integration tests in `tests/cli.rs`; none is compiled into either fuzz target.
+All fuzz-relevant non-test sources, fuzz target files, manifests, lockfiles, and
+seeds matched the manifest. The
+initial container-create attempt did not start because its offline vendor/config
+mounts were absent; the corrected retry above is the only successful result for
+this attempt. The preflight printed a `GLIBC_2.39` warning from `cargo-fuzz`, but
+reported version 0.13.2 and the bounded build/runs all exited 0. These bounded
+runs are evidence for those inputs and runtime only, not a correctness proof.
+
 The isolated local quality check passed Clippy, the full non-ignored all-features
 workspace tests, and the all-features build. The tests included all five
 `runner_protocol` tests. Cargo's test/dev debug information was limited to line
@@ -273,11 +305,19 @@ passed both CI jobs: formatting, Clippy, tests, build, examples, both dependency
 audits, SBOM generation, and artifact upload. This does not close the recovery
 matrix or four candidate validations.
 
-Remaining G11 evidence includes the twelve-scenario matrix, the four external
-candidate validations, a performance baseline, review/triage of the separate
-security assessment, and repeatable target-output/corpus retention evidence.
-The bounded fuzz runs establish only that those inputs did not produce a
-reported crash during the recorded runs.
+Remaining G11 evidence includes the incomplete twelve-scenario matrix, the four
+external candidate validations, and review/triage of the separate security
+assessment. A full bounded run of both fuzz targets with generated corpora and
+artifact directories retained is now recorded above; this remains bounded fuzz
+evidence, not proof of correctness. The local performance baseline was rerun on
+2026-11-07 and is recorded in the development plan; the one-second objective on
+CI reference hardware remains unverified.
+
+After adding focused SQLite checks for competing CLIs and stale migration
+sources and the shared-schema namespace race, the local all-features workspace
+suite passed with 140 tests passed, 25 ignored, and zero failures; Clippy, build,
+formatting, and both executable examples also passed. This local gate does not
+cover the ignored server integrations or finish the documented recovery matrix.
 
 **Final local supply-chain check 2026-11-06:** `sh scripts/supply-chain.sh`
 passed again with the pinned audit tools and refreshed RustSec data (1,422
@@ -286,3 +326,99 @@ deny graphs passed. The regenerated application BOM validated as CycloneDX 1.3
 with 238 components. Log: `attempt-02/logs/supply-chain-final.log`. The
 push-triggered CI run `42312783506` on `5672dd0` also passed both jobs and
 uploaded the SBOM; see the recorded workflow result above.
+
+**Final local gate 2026-11-07 (after metadata-expectation corrections):**
+`cargo fmt --all -- --check`, `git diff --check`,
+`cargo clippy --workspace --all-targets --all-features -- -D warnings`,
+`cargo test --workspace --all-features --locked`,
+`cargo build --workspace --all-features --locked`, both documented SQLite
+examples, and `sh scripts/supply-chain.sh` passed. The workspace test run had
+143 passed, 49 ignored, and zero failures; the two `runner_protocol` CLI tests
+completed in 181.31 seconds (approximately 181 seconds). Test-only metadata
+expectations now refer to the current v5 format; no production contract changed.
+The opt-in
+MySQL/MariaDB recovery
+tests for death before intent, after intent/before SQL, after SQL/before ACK,
+after ACK/before finalization, and same-namespace/shared-database contention
+were each run twice on disposable loopback MySQL 8.4.11/8.4.13/9.7.4 and
+MariaDB 11.8.2/11.8.9/13.0.2. Bootstrap and metadata-upgrade fault journeys
+also passed twice on those six versions. The new MySQL/MariaDB v4→v5 partial-DDL upgrade failure
+tests passed twice each on MySQL 8.4.11/8.4.13/9.7.4 and MariaDB
+11.8.2/11.8.9/13.0.2; the PostgreSQL
+v4→v5 rollback-after-prior-DDL test passed twice each on 16.15 and 18.6. Those
+upgrade results, along with the bootstrap and rollback
+boundaries, are detailed in [`recovery-drills.md`](recovery-drills.md). The SQLite
+initial-bootstrap failure and rollback-before-failed-run-crash tests passed
+twice; PostgreSQL/MySQL/MariaDB source-revalidation tests were also run twice;
+server runs used fresh rootless containers published only on loopback, and the
+MySQL-family source-revalidation tests explicitly reconciled their confirmed
+no-DDL outcomes. The latest SBOM validated as CycloneDX 1.3 with 238 components.
+Root and fuzz dependency audits used 1,422
+RustSec advisories and covered 300 and 244 locked packages respectively. The
+dependency policy checks passed; `cargo deny` emitted non-failing duplicate
+dependency-version and unused-license-allowance warnings. These local checks do
+not complete the twelve-scenario cross-driver matrix, the external security
+validations, or the CI-reference-hardware performance objective; G11 remains
+pending.
+
+**Additional complete opt-in and TLS validation — 2026-11-07:** four full
+`cargo test --workspace --all-features --locked -- --ignored` runs passed 45
+tests apiece (180 opt-in test executions total) against fresh loopback
+databases. Combinations were PostgreSQL 16.15 + MySQL 8.4.13 + MariaDB 11.8.9;
+PostgreSQL 18.6 + MySQL 8.4.13 + MariaDB 11.8.9; PostgreSQL 16.15 + MySQL
+8.4.11 + MariaDB 11.8.2; and PostgreSQL 18.6 + MySQL 9.7.4 + MariaDB 13.0.2.
+Three TLS opt-ins also passed using ephemeral certificates generated inside
+disposable containers: PostgreSQL 16.15, MySQL 8.4.13, and MariaDB 11.8.9. The
+fourth excluded opt-in requires PgBouncer; neither a local binary nor image was
+present, and no image was downloaded. `recovery-drills.md` records the
+per-scenario implications. This evidence does not resolve blockers #11/#12 or
+external G11 requirements.
+
+**PgBouncer opt-in — 2026-11-08:** the ignored transaction-pooling regression
+`database::postgres::tests::local_pgbouncer_backend_change_is_rejected_after_session_lock_acquisition`
+passed twice each on disposable PostgreSQL 16.15 and 18.6. PgBouncer 1.26.0 was
+built from `lucaswilliameufrasio/pgbouncer-docker` commit
+`04dc81d4ab0a191bdc90e01d2b6c882c8c5b620f`, using the locally cached
+`debian:bookworm-slim` base via `DEBIAN_CODENAME=bookworm`; no Docker images were
+pulled. The Dockerfile downloaded build packages and the checksum-verified
+upstream source archive. The default Debian Trixie base was not locally
+available, so the repository's default runtime base is not covered by this
+test. Only PgBouncer was bound to loopback; PostgreSQL used the disposable
+container network without a host port. See `recovery-drills.md` for setup and
+the test's scope. G11 remains pending for its other matrix and external
+requirements.
+
+**Follow-up search for external security artifacts — 2026-11-08:** read-only
+`gh` code searches across accessible user repositories for `needs_validation`
+and `security assessment`, plus issue/PR searches on this repository, found only
+documentation references and no standalone assessment report or four structured
+candidate records. This does not establish that they are absent from other
+storage. Their content and status remain unverified until their owner provides
+an accessible path or copy.
+
+**MySQL/MariaDB transaction-policy regression and full local gate — 2026-11-08:**
+`source::tests::mysql_migrations_require_explicit_never_and_match_the_target_dialect`
+now asserts that both an omitted policy and explicit `transaction=always` are
+rejected during source discovery, while explicit `transaction=never` is
+accepted. The focused test passed, and the all-features workspace suite passed
+with 143 passed, 49 ignored, and zero failures. This supports classifying
+rollback-before-failure-record as inapplicable to MySQL/MariaDB under ADR-016;
+it does not close PostgreSQL 17.11 coverage or the other matrix gaps.
+
+After that test change, formatting, `git diff --check`, Clippy, the full
+all-features workspace tests, build, both documented SQLite examples, and
+`sh scripts/supply-chain.sh` passed. The supply-chain check emitted only the
+existing non-failing duplicate-version and unused-license-allowance warnings;
+advisories, bans, licenses, and source checks passed. The four external
+`needs_validation` records, separate security assessment, CI-reference-hardware
+performance result, and reusable approved-plan CLI decision remain unresolved;
+G11 is still pending.
+
+**Additional MySQL-family version coverage — 2026-11-07:** the MySQL-focused
+ignored workspace suite passed 14 tests each on disposable MySQL 8.4.11 and
+9.7.4. The MariaDB-focused suite passed 12 MariaDB-specific tests on each of
+11.8.2 and 13.0.2; the two direct metadata/legacy-adapter tests also passed on
+each of those versions. Databases were newly created and servers published only
+on loopback. A broad MySQL-name filter initially selected one MySQL-vendor-only
+engine assertion on MariaDB; exact MariaDB-compatible filters passed. The
+remaining G11 blockers are unchanged.

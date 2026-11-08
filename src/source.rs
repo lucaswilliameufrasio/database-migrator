@@ -872,6 +872,16 @@ mod tests {
 
         fs::write(
             &path,
+            "-- dbm:dialect mysql\n-- dbm:transaction always\n-- dbm:up\nCREATE TABLE users (id BIGINT PRIMARY KEY);\n",
+        )
+        .expect("write migration requesting transactional MySQL execution");
+        assert!(matches!(
+            discover(&config),
+            Err(crate::error::DbmError::Unsupported(_))
+        ));
+
+        fs::write(
+            &path,
             "-- dbm:dialect mysql\n-- dbm:transaction never\n-- dbm:up\nCREATE TABLE users (id BIGINT PRIMARY KEY);\n-- dbm:down\nDROP TABLE users;\n",
         )
         .expect("write explicitly non-transactional migration");

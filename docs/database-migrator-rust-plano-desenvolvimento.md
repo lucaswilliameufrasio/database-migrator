@@ -1053,6 +1053,26 @@ de CI; repetir em hardware de referência e ampliar a matriz antes de usar como
 critério de release. O script usa `/tmp/opencode` por padrão; `DBM_BENCH_TMPDIR`
 pode selecionar outro diretório descartável.
 
+**Repetição local (2026-11-07, commit `abb5aeb`):** `cargo build --release
+--bin dbm --locked` e `sh scripts/bench-validate.sh target/release/dbm 1000 5`
+passaram com 1 warm-up; tempos de parede: 23, 23, 23, 24 e 23 ms (mediana
+23 ms). `dbm` contou 1.000 migrations e o harness confirmou que não criou
+`dbm.sqlite`. Ambiente: Intel Xeon E5-2670 v2, 20 CPUs lógicas, 46 GiB RAM,
+Linux 6.12.113 x86_64, `rustc`/Cargo 1.99.1, perfil release; carga média do host
+no início: 2.15 em 20 CPUs. Este baseline atualiza a evidência local, não é
+comparável ao baseline de outro hardware e não verifica o objetivo de 1 s no
+hardware de referência da CI.
+
+**Repetição no checkout atual (2026-11-07; alterações locais não commitadas):**
+`cargo build --release --bin dbm --locked` e
+`DBM_BENCH_TMPDIR=/tmp/opencode sh scripts/bench-validate.sh target/release/dbm 1000 5`
+passaram com 1 warm-up; tempos: 24, 23, 23, 23 e 24 ms (mediana 23 ms). O
+harness confirmou 1.000 migrations e ausência de criação de `dbm.sqlite`.
+Ambiente: Intel Xeon E5-2670 v2, 20 CPUs lógicas, aproximadamente 47 GiB RAM,
+Linux 6.12.113+deb13-amd64 x86_64, `rustc`/Cargo 1.99.1, perfil release. Esta
+medida fornece um baseline do checkout atual; não verifica o objetivo de 1 s no
+hardware de referência da CI.
+
 ### 16.3 Resiliência
 
 - Erros de rede antes de qualquer statement podem permitir retry apenas da **conexão** em operações read-only; nunca fazer retry cego do DDL depois de envio.
@@ -1357,9 +1377,219 @@ após a correção. As versões estáveis mais recentes foram conferidas nas not
 oficiais. Evidência e limites por cenário estão em `docs/recovery-drills.md`.
 Isso fecha somente esses exercícios: a matriz de 12 cenários continua
 incompleta, com outros limites de
-concorrência e boundaries de falha sem validação; o relatório de segurança,
-quatro validações pendentes e baseline de performance ainda não foram
-concluídos. G11 permanece pendente e G12 continua sem autorização de release.
+concorrência e boundaries de falha sem validação; o relatório de segurança e
+quatro validações pendentes continuam sem conclusão. O baseline local foi
+atualizado, mas o objetivo no hardware de referência da CI segue sem verificação.
+G11 permanece pendente e G12 continua sem autorização de release.
+
+**Cobertura adicional G11 — 2026-11-07:** o teste CLI SQLite agora executa um
+segundo `up` enquanto a primeira CLI ainda detém o writer lock, mata a primeira
+durante SQL e confirma `SAFETY_BLOCKED` sem run adicional (duas execuções). Um
+teste do engine também muda o arquivo de migration após capturar o plano e
+confirma a rejeição sem efeitos SQL (duas execuções). Isso cobre fatias dos
+cenários 8 e 12 somente para SQLite; os adapters de servidor e as janelas exatas
+da aprovação CLI seguem pendentes. O cenário 9 também passou em teste de engine
+com dois namespaces em um schema PostgreSQL compartilhado, duas vezes cada nas
+versões 16.15 e 18.6: a segunda execução não entrou no SQL até a primeira
+finalizar e depois registrou falha pelo objeto já existente, sem contaminar o
+namespace anterior. Outros adapters seguem sem essa validação. Após essas
+mudanças, `cargo fmt --all
+-- --check`, Clippy de workspace/all-targets/all-features, build completo e os
+dois exemplos passaram; `cargo test --workspace --all-features --locked`
+registrou 140 passed, 25 ignored e zero failures. Detalhes em
+`docs/recovery-drills.md`.
+
+**Retomada da matriz G11 — 2026-11-07:** foram adicionados limites CLI para morte
+antes do intent; após intent e antes do envio de SQL; após SQL e antes do ACK;
+após ACK e antes da finalização; e após rollback transacional e antes de persistir
+o run falho. O limite entre intent e SQL usa um proxy PostgreSQL loopback que
+retém a instrução sem encaminhá-la ao servidor. A combinação e o limite do proxy
+passaram duas vezes cada em PostgreSQL 16.15 e 18.6 descartáveis. Um fault de
+bootstrap PostgreSQL passou duas vezes por versão e confirmou rollback de todas
+as tabelas metadata. A disputa entre duas CLIs no mesmo namespace passou duas
+vezes por versão: a segunda aguardou o timeout curto configurado no fixture,
+retornou `LOCK_UNAVAILABLE` e não criou run ou efeito SQL. O upgrade SQLite v4→v5
+também recebeu falha injetada durante o rewrite; o teste confirmou rollback e
+preservação do formato 4 e passou no teste direcionado. Evidência por boundary
+está em `docs/recovery-drills.md`.
+
+O cenário de bootstrap recebeu ainda falha determinística nos adapters
+MySQL/MariaDB: o proxy de teste pausa o terceiro DDL até uma conexão administrativa
+descartável criar um conflito de nome. As CLIs retornaram
+`RECONCILIATION_REQUIRED`, preservaram as duas tabelas já criadas sem identidade
+metadata nem efeito de migration, e bloquearam retry automático com
+`STATE_DIVERGED`. Os dois testes passaram duas vezes cada em MySQL 9.7.4 e
+MariaDB 13.0.2; os containers locais de teste foram removidos. Isso prova apenas
+esse boundary e essas versões, não rollback de DDL nesses servidores nem a
+matriz completa de upgrades/bootstrap.
+
+**Boundaries MySQL/MariaDB adicionais — 2026-11-07:** os testes CLI de morte antes
+do intent, depois do intent e antes do SQL, depois do SQL e antes do ACK, e depois
+do ACK e antes da finalização passaram duas vezes cada em instâncias descartáveis
+de MySQL 9.7.4 e MariaDB 13.0.2. Cada jornada inspeciona o journal e os efeitos
+reais e confirma retry bloqueado. O teste de namespaces distintos no mesmo
+database também passou duas vezes por versão: o segundo writer aguarda o named
+lock do database, não cria run antes da liberação e, após o primeiro criar o
+objeto compartilhado, deixa seu próprio run/step indeterminado sem linha aplicada.
+Os containers foram encerrados. A tentativa de cobrir rollback transacional
+MySQL/MariaDB foi interrompida pelo contrato existente: MySQL 9.7.4 rejeita
+`transaction=always` com `CAPABILITY_UNSUPPORTED`; o perfil inicial exige
+`transaction=never`. Não alterei o contrato de produção para forçar esse cenário.
+
+O cenário 12 permanece parcial: a revalidação após mudança da source foi provada
+no engine/SQLite, mas a CLI não oferece um plano aprovado reutilizável (`plan` é
+somente leitura e `up` recalcula o plano). Não há contrato CLI existente que
+permita afirmar cobertura da janela aprovação-execução sem uma decisão de produto.
+Os resultados e limites por cenário estão em `docs/recovery-drills.md`.
+
+**Cenário 9 SQLite — 2026-11-07:**
+`cli_serializes_sqlite_writers_across_namespaces_sharing_schema_objects` foi
+executado duas vezes. Duas CLIs usam o mesmo arquivo e migrations idênticas em
+namespaces distintos; enquanto a primeira mantém o writer lock, a segunda não
+conclui nem cria run. Após o primeiro commit, a segunda registra falha isolada,
+sem linha aplicada para seu namespace, e o objeto compartilhado existe uma vez.
+Essa evidência fecha somente esse cenário em SQLite, não as outras janelas da
+matriz.
+
+**Cenário 10 SQLite — 2026-11-07:**
+`database::sqlite::tests::sqlite_metadata_bootstrap_failure_rolls_back_partial_tables`
+usa a sessão real do adapter em uma transação de escrita e injeta colisão no
+índice criado após as primeiras tabelas do bootstrap. Após a falha e rollback,
+nenhuma tabela metadata reservada permanece e o objeto que provocou a colisão
+continua intacto. O teste direcionado passou duas vezes; isso complementa, mas
+não substitui, a evidência separada do upgrade SQLite v4→v5.
+
+**Cenário 10 PostgreSQL e MySQL/MariaDB — 2026-11-07:**
+`database::postgres::tests::local_postgres_v4_upgrade_failure_rolls_back_prior_ddl`
+usa um event trigger no schema descartável para falhar na segunda `ALTER TABLE`
+do upgrade v4→v5, depois que a primeira adicionou `repeatable_name`. O rollback
+transacional remove a alteração anterior e preserva identidade v4, migration
+nativa e journal run/step; passou duas vezes cada em PostgreSQL 16.15 e 18.6.
+`cli_mysql_metadata_upgrade_failure_preserves_partial_ddl_for_reconciliation`
+e seu equivalente MariaDB usam um proxy loopback para interromper a conexão antes
+da `ALTER TABLE schema_migration_runs`, depois que a alteração
+`schema_migrations` já commitou implicitamente. Ambos retornam
+`RECONCILIATION_REQUIRED`; o teste confirma identidade v4, coluna repeatable
+persistida, journal nativo preservado, nenhuma tabela de staging e retry recusado
+com `STATE_DIVERGED` sem mutação adicional. Passaram duas vezes cada em MySQL
+8.4.11, 8.4.13 e 9.7.4, e MariaDB 11.8.2, 11.8.9 e 13.0.2, em containers
+descartáveis. Esses resultados demonstram estados de falha diferentes segundo a
+atomicidade real de cada servidor; não alteram o contrato de produção nem provam
+todas as versões de upgrade.
+
+**Cobertura MySQL/MariaDB adicional — 2026-11-07:** os oito testes CLI opt-in
+de recuperação/metadata (antes e depois de intent/ACK, contenção no mesmo
+namespace, namespaces compartilhando objetos, falhas de bootstrap e upgrade)
+passaram duas vezes cada em MySQL 8.4.11 e MariaDB 11.8.2, além das execuções
+anteriores nas linhas MySQL 9.7.4 e MariaDB 13.0.2. Só os guards dos testes de
+intent/ACK e compartilhamento de namespace foram ampliados; nenhum contrato de
+produção mudou. Isso amplia a evidência em patches adicionais, sem completar a
+matriz para todas as versões suportadas.
+
+**Cenário 11 SQLite — 2026-11-07:**
+`sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved`
+aplica primeiro uma migration baseline e então falha uma migration transacional
+após DDL. O teste observa o journal SQLite desaparecer no rollback e reaparecer
+quando começa a transação separada que grava o run como `failed`; mata a CLI
+enquanto um trigger de teste retarda esse update. A baseline permanece aplicada,
+o DDL falho e seus steps não persistem, o run permanece `started`, o lock
+diagnóstico fica `observed_active` e um retry é bloqueado com `SAFETY_BLOCKED`.
+O teste direcionado passou duas vezes localmente. É evidência SQLite adicional;
+os limites #1/#2/#4/#5 continuam não sendo estados duráveis separados no perfil
+transacional SQLite.
+
+**Cenário 12 PostgreSQL — 2026-11-07:**
+`engine::tests::local_postgres_rejects_source_changed_after_plan_before_sql`
+captura plano/manifesto, altera a source antes da execução e confirma `Safety`,
+run `failed` sem steps/applied rows, lock liberado e ausência dos objetos de
+ambas as versões do SQL. Passou duas vezes em cada instância descartável
+loopback PostgreSQL 16.15 e 18.6. É evidência de revalidação do engine, não de
+aprovação reutilizável na CLI.
+
+O mesmo boundary engine-level foi exercitado por
+`engine::tests::local_mysql_rejects_source_changed_after_plan_before_sql` e
+`engine::tests::local_mariadb_rejects_source_changed_after_plan_before_sql`. Em
+MySQL 9.7.4 e MariaDB 13.0.2, cada teste passou duas vezes: não houve intent nem
+SQL após a divergência, os dois objetos candidatos estavam ausentes, e a source
+original foi restaurada antes da reconciliação explícita `operation_not_applied`,
+que removeu o bloqueio diagnóstico. Isso ainda não define nem verifica um fluxo
+CLI de aprovação reutilizável.
+
+**Rodada adicional de recuperação MySQL/MariaDB — 2026-11-07:** os oito testes
+CLI opt-in de morte entre intent/SQL/ACK, concorrência no mesmo namespace,
+namespaces compartilhando objetos e falhas de bootstrap/upgrade passaram duas
+vezes cada em MySQL 8.4.13 e MariaDB 11.8.9. Com as rodadas já registradas em
+MySQL 8.4.11/9.7.4 e MariaDB 11.8.2/13.0.2, os oito testes têm duas passagens
+em cada uma das seis versões. A jornada agregada para #3/#6/#7 e a revalidação
+engine-level #12 também passaram duas vezes em 8.4.13 e 11.8.9.
+
+**Opt-ins locais adicionais — 2026-11-07:** 45 testes ignorados (biblioteca,
+CLI, DSL e importação legada) passaram em cada uma de quatro rodadas completas
+(180 execuções), usando databases descartáveis nas combinações PostgreSQL
+16.15/MySQL 8.4.13/MariaDB 11.8.9, PostgreSQL 18.6/MySQL 8.4.13/MariaDB
+11.8.9, PostgreSQL 16.15/MySQL 8.4.11/MariaDB 11.8.2 e PostgreSQL 18.6/MySQL
+9.7.4/MariaDB 13.0.2. Os três testes TLS passaram em PostgreSQL 16.15, MySQL
+8.4.13 e MariaDB 11.8.9 com CAs efêmeras; naquela rodada, o cenário PgBouncer
+não foi executado porque não havia binário/imagem local. O teste PgBouncer
+posterior está registrado abaixo. Isso amplia a evidência, mas não fecha os
+blockers restantes: #11 ainda não foi verificado em PostgreSQL 17.11, e #12 não
+tem contrato CLI para reutilizar um plano aprovado; a fronteira #11 não se aplica
+ao perfil MySQL/MariaDB `transaction=never`, conforme ADR-016 e a regressão de
+descoberta registrada em `recovery-drills.md`. A matriz completa continua aberta.
+
+**PgBouncer transaction pooling — 2026-11-08:** o teste opt-in
+`database::postgres::tests::local_pgbouncer_backend_change_is_rejected_after_session_lock_acquisition`
+passou duas vezes em cada uma das instâncias descartáveis PostgreSQL 16.15 e
+18.6. PgBouncer 1.26.0 foi construído do repositório
+`lucaswilliameufrasio/pgbouncer-docker`, commit
+`04dc81d4ab0a191bdc90e01d2b6c882c8c5b620f`. Para evitar pull de imagem, o build
+usou a base `debian:bookworm-slim` já local via
+`DEBIAN_CODENAME=bookworm`, em vez do default Trixie do Dockerfile; isso não
+valida o runtime Trixie da imagem padrão. Nenhuma imagem Docker foi baixada; os
+pacotes Debian e o tarball de source upstream, verificado pelo checksum do repo,
+foram obtidos durante o build. O pooler usou transaction pooling,
+`DEFAULT_POOL_SIZE=2` e porta publicada somente em loopback; o PostgreSQL não
+teve porta de host. A verificação confirma a rejeição do backend físico trocado,
+mas não executa uma jornada CLI de crash nem fecha a matriz de recuperação.
+
+**Escopo transacional do cenário #11 e gate local — 2026-11-08:** o teste
+`source::tests::mysql_migrations_require_explicit_never_and_match_the_target_dialect`
+agora verifica que source MySQL/MariaDB com `transaction=always` é recusada
+antes de conectar, enquanto `transaction=never` é aceita. O teste direcionado e
+o gate `cargo test --workspace --all-features --locked` passaram; a suíte teve
+143 passed e 49 ignored. Isso torna o rollback-before-failure-record não
+aplicável a MySQL/MariaDB sob ADR-016, sem mudar o contrato. PostgreSQL 17.11
+continua sem essa fronteira verificada; #12 e as validações externas também
+continuam pendentes. Formatação, Clippy, build, exemplos, supply-chain e
+`git diff --check` passaram nesta revisão local; nenhum resultado remoto foi
+inferido.
+
+**Cobertura adicional por versão MySQL/MariaDB — 2026-11-07:** os 14 opt-ins
+MySQL-focused passaram em MySQL 8.4.11 e 9.7.4. Em MariaDB 11.8.2 e 13.0.2,
+passaram 12 testes específicos do adapter, além dos dois testes diretos de
+upgrade de metadata e preservação de histórico legado. Os testes incluíram a
+jornada agregada #3/#6/#7. As instâncias foram descartáveis e loopback-only; a
+seleção ampla de testes `local_mysql_` também executou um assert de vendor
+MySQL-only em MariaDB, por isso os dois testes compatíveis foram repetidos por
+filtros exatos e passaram. Estes resultados ampliam, mas não fecham G11.
+
+Esses resultados ampliam cenários selecionados, mas não completam a matriz para
+todos os adapters/versões nem provam todos os limites de bootstrap/upgrade. O
+gate completo local foi repetido em 2026-11-07 após os novos testes: formatação,
+diff check, Clippy, `cargo test --workspace --all-features --locked` (143 passed,
+49 ignored, zero failures), build, ambos exemplos SQLite e
+`sh scripts/supply-chain.sh`. Os dois testes de bootstrap MySQL/MariaDB também
+foram repetidos após a refatoração do proxy e passaram em MySQL 9.7.4 e MariaDB
+13.0.2 descartáveis. O SBOM validou como CycloneDX 1.3 com 238 componentes;
+advisories, bans, licenses e sources passaram, com avisos não bloqueantes de
+versões duplicadas e allowlists de licenças não usadas. Detalhes em
+`docs/supply-chain.md` e `docs/recovery-drills.md`. O relatório externo de
+segurança e os quatro registros estruturados
+`needs_validation` continuam indisponíveis no checkout/scratch inspecionados; o
+follow-up `gh` de 2026-11-08 encontrou apenas referências documentais nos repos
+acessíveis, não o relatório nem os quatro registros. O objetivo de um segundo no
+hardware de referência da CI também permanece sem evidência. Portanto G11
+continua parcial/pendente; G12 permanece fora do escopo, sem push, tag ou release.
 
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 

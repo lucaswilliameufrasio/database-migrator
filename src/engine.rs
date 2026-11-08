@@ -5059,6 +5059,449 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn adapter_rejects_source_changed_after_plan_before_sql() {
+        let (_directory, config) = setup();
+        let migration_name = "20261021162643981234_changed_after_plan.sql";
+        write_migration(
+            &config,
+            migration_name,
+            "-- dbm:up\nCREATE TABLE original_plan_effect (id INTEGER);\n",
+        );
+        let migrations = crate::source::discover(&config).expect("discover planned migration");
+        let manifest = manifest_hash(&migrations);
+        let adapter = database::adapter_for(&config).expect("resolve SQLite adapter");
+        let mut session = adapter
+            .connect(&config, SessionIntent::ReadWrite)
+            .await
+            .expect("connect SQLite migration session");
+        let snapshot = session
+            .read_snapshot(&config.config.namespace)
+            .await
+            .expect("read initial SQLite snapshot");
+        let approved_plan = plan_from_snapshot(&config, &migrations, &snapshot)
+            .expect("create plan before source change");
+        let batch_id = uuid::Uuid::new_v4().to_string();
+
+        write_migration(
+            &config,
+            migration_name,
+            "-- dbm:up\nCREATE TABLE changed_source_effect (id INTEGER);\n",
+        );
+
+        let result = run_adapter_migration(
+            &config,
+            session.as_mut(),
+            &migrations,
+            None,
+            MigrationOperation {
+                migration: &migrations[0],
+                initial_manifest: &manifest,
+                batch_id: &batch_id,
+                plan_hash: &approved_plan.plan_hash,
+                direction: "up",
+            },
+        )
+        .await;
+        assert!(matches!(result, Err(DbmError::Safety(_))));
+
+        let after_rejection = session
+            .read_snapshot(&config.config.namespace)
+            .await
+            .expect("read SQLite journal after stale-plan rejection");
+        assert!(after_rejection.applied.is_empty());
+        assert_eq!(after_rejection.runs.len(), 1);
+        assert_eq!(after_rejection.runs[0].state, "failed");
+        assert!(after_rejection.steps.is_empty());
+        assert_eq!(
+            after_rejection
+                .lock
+                .as_ref()
+                .map(|lock| lock.state.as_str()),
+            Some("released")
+        );
+        session
+            .close()
+            .await
+            .expect("close SQLite migration session");
+
+        let connection = rusqlite::Connection::open(
+            config.sqlite_database_path().expect("SQLite database path"),
+        )
+        .expect("open target after stale-plan rejection");
+        let effect_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('original_plan_effect', 'changed_source_effect')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query migration effects");
+        assert_eq!(effect_count, 0);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires DBM_TEST_DATABASE_URL for a disposable loopback PostgreSQL instance"]
+    async fn local_postgres_rejects_source_changed_after_plan_before_sql() {
+        use std::net::IpAddr;
+
+        use tokio_postgres::config::{Config as PostgresConfig, Host, SslMode};
+
+        let (_directory, mut config) = setup();
+        let database_url = std::env::var("DBM_TEST_DATABASE_URL")
+            .expect("DBM_TEST_DATABASE_URL must identify a disposable loopback target");
+        let parsed = database_url
+            .parse::<PostgresConfig>()
+            .expect("DBM_TEST_DATABASE_URL must be a valid PostgreSQL connection string");
+        assert_eq!(parsed.get_ssl_mode(), SslMode::Disable);
+        assert!(parsed.get_hosts().iter().all(|host| {
+            match host {
+                Host::Tcp(host) if host.eq_ignore_ascii_case("localhost") => true,
+                Host::Tcp(host) => host
+                    .parse::<IpAddr>()
+                    .is_ok_and(|address| address.is_loopback()),
+                Host::Unix(_) => true,
+            }
+        }));
+        assert!(parsed.get_hostaddrs().iter().all(IpAddr::is_loopback));
+
+        config.config.target.driver = "postgres".to_owned();
+        config.config.target.database = None;
+        config.config.target.url_env = Some("DBM_TEST_DATABASE_URL".to_owned());
+        config.config.target.allow_insecure_transport = true;
+        config.config.target.environment = crate::config::Environment::Test;
+        config.config.namespace = format!("stale_source_{}", uuid::Uuid::new_v4().simple());
+        config.database_path = None;
+        let migration_name = "20261021162643981234_changed_after_plan.sql";
+        let initial_table = format!("initial_effect_{}", uuid::Uuid::new_v4().simple());
+        let changed_table = format!("changed_effect_{}", uuid::Uuid::new_v4().simple());
+        write_migration(
+            &config,
+            migration_name,
+            &format!(
+                "-- dbm:dialect postgres\n-- dbm:transaction always\n-- dbm:up\nCREATE TABLE {initial_table} (id integer PRIMARY KEY);\n-- dbm:down\nDROP TABLE {initial_table};\n"
+            ),
+        );
+        let migrations = crate::source::discover(&config).expect("discover planned migration");
+        let manifest = manifest_hash(&migrations);
+        let adapter = database::adapter_for(&config).expect("resolve PostgreSQL adapter");
+        let mut session = adapter
+            .connect(&config, SessionIntent::ReadWrite)
+            .await
+            .expect("connect to disposable PostgreSQL");
+        let schema = format!("dbm_stale_source_{}", uuid::Uuid::new_v4().simple());
+        session
+            .begin()
+            .await
+            .expect("begin isolated schema creation");
+        session
+            .execute_statement(&format!("CREATE SCHEMA {schema}"))
+            .await
+            .expect("create isolated stale-source schema");
+        session
+            .commit()
+            .await
+            .expect("commit isolated schema creation");
+        session
+            .begin()
+            .await
+            .expect("begin isolated search-path setup");
+        session
+            .execute_statement(&format!("SET search_path TO {schema}"))
+            .await
+            .expect("scope migration session to isolated schema");
+        session
+            .commit()
+            .await
+            .expect("commit isolated search-path setup");
+        let snapshot = session
+            .read_snapshot(&config.config.namespace)
+            .await
+            .expect("read PostgreSQL state before planning");
+        let approved_plan = plan_from_snapshot(&config, &migrations, &snapshot)
+            .expect("create PostgreSQL plan before source change");
+        let batch_id = uuid::Uuid::new_v4().to_string();
+
+        write_migration(
+            &config,
+            migration_name,
+            &format!(
+                "-- dbm:dialect postgres\n-- dbm:transaction always\n-- dbm:up\nCREATE TABLE {changed_table} (id integer PRIMARY KEY);\n-- dbm:down\nDROP TABLE {changed_table};\n"
+            ),
+        );
+        let result = run_adapter_migration(
+            &config,
+            session.as_mut(),
+            &migrations,
+            None,
+            MigrationOperation {
+                migration: &migrations[0],
+                initial_manifest: &manifest,
+                batch_id: &batch_id,
+                plan_hash: &approved_plan.plan_hash,
+                direction: "up",
+            },
+        )
+        .await;
+        assert!(matches!(result, Err(DbmError::Safety(_))));
+
+        let after_rejection = session
+            .read_snapshot(&config.config.namespace)
+            .await
+            .expect("read PostgreSQL journal after stale-plan rejection");
+        assert!(after_rejection.applied.is_empty());
+        assert_eq!(after_rejection.runs.len(), 1);
+        assert_eq!(after_rejection.runs[0].state, "failed");
+        assert!(after_rejection.steps.is_empty());
+        assert_eq!(
+            after_rejection
+                .lock
+                .as_ref()
+                .map(|lock| lock.state.as_str()),
+            Some("released")
+        );
+        session
+            .close()
+            .await
+            .expect("close PostgreSQL stale-source session");
+
+        let (observer, observer_connection) =
+            tokio_postgres::connect(&database_url, tokio_postgres::NoTls)
+                .await
+                .expect("connect observer to disposable PostgreSQL");
+        let observer_task = tokio::spawn(observer_connection);
+        let effects = observer
+            .query_one(
+                "SELECT COUNT(*)::bigint FROM pg_catalog.pg_tables \
+                 WHERE schemaname = $1 AND tablename = ANY($2)",
+                &[&schema, &vec![initial_table, changed_table]],
+            )
+            .await
+            .expect("inspect PostgreSQL migration effects")
+            .get::<_, i64>(0);
+        observer
+            .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
+            .await
+            .expect("drop isolated stale-source schema");
+        drop(observer);
+        observer_task.abort();
+        let _ = observer_task.await;
+        assert_eq!(effects, 0);
+    }
+
+    async fn assert_mysql_rejects_source_changed_after_plan(
+        environment_variable: &str,
+        expected_vendor: &str,
+    ) {
+        use std::net::IpAddr;
+        use std::str::FromStr;
+
+        use mysql_async::prelude::Queryable;
+
+        let database_url = std::env::var(environment_variable).unwrap_or_else(|_| {
+            panic!("{environment_variable} must identify a disposable loopback target")
+        });
+        let connection_options = mysql_async::Opts::from_url(&database_url)
+            .unwrap_or_else(|_| panic!("{environment_variable} must be a valid MySQL URL"));
+        assert!(
+            connection_options.ssl_opts().is_none(),
+            "disposable local MySQL-family test server must use explicit loopback plaintext"
+        );
+        let host = connection_options.ip_or_hostname();
+        assert!(
+            host.eq_ignore_ascii_case("localhost")
+                || IpAddr::from_str(host).is_ok_and(|address| address.is_loopback()),
+            "MySQL-family integration tests require an explicit loopback host"
+        );
+        assert!(
+            connection_options
+                .db_name()
+                .is_some_and(|name| !name.is_empty()),
+            "disposable MySQL-family URL must select a database"
+        );
+
+        let mut observer = mysql_async::Conn::new(connection_options.clone())
+            .await
+            .expect("connect to disposable MySQL-family server");
+        let server_version: String = observer
+            .query_first("SELECT VERSION()")
+            .await
+            .expect("read MySQL-family server version")
+            .expect("server returned a version");
+        let is_mariadb = server_version.to_ascii_lowercase().contains("mariadb");
+        assert_eq!(
+            is_mariadb,
+            expected_vendor.eq_ignore_ascii_case("mariadb"),
+            "unexpected MySQL-family server: {server_version}"
+        );
+        observer
+            .disconnect()
+            .await
+            .expect("close initial MySQL-family observer");
+
+        let (_directory, mut config) = setup();
+        config.config.target.driver = "mysql".to_owned();
+        config.config.target.database = None;
+        config.config.target.url_env = Some(environment_variable.to_owned());
+        config.config.target.allow_insecure_transport = true;
+        config.config.target.environment = crate::config::Environment::Test;
+        config.config.namespace = format!("stale_source_{}", uuid::Uuid::new_v4().simple());
+        config.database_path = None;
+        let suffix = uuid::Uuid::new_v4().simple().to_string();
+        let initial_table = format!("dbm_initial_effect_{suffix}");
+        let changed_table = format!("dbm_changed_effect_{suffix}");
+        let migration_name = "20261021162643981234_changed_after_plan.sql";
+        let initial_sql = format!(
+            "-- dbm:dialect mysql\n-- dbm:transaction never\n-- dbm:up\nCREATE TABLE {initial_table} (id BIGINT PRIMARY KEY);\n-- dbm:down\nDROP TABLE {initial_table};\n"
+        );
+        write_migration(&config, migration_name, &initial_sql);
+        let migrations = crate::source::discover(&config).expect("discover planned migration");
+        let manifest = manifest_hash(&migrations);
+        let adapter = database::adapter_for(&config).expect("resolve MySQL-family adapter");
+        let mut session = adapter
+            .connect(&config, SessionIntent::ReadWrite)
+            .await
+            .expect("connect migration session to disposable MySQL-family server");
+        let snapshot = session
+            .read_snapshot(&config.config.namespace)
+            .await
+            .expect("read MySQL-family state before planning");
+        let approved_plan = plan_from_snapshot(&config, &migrations, &snapshot)
+            .expect("create MySQL-family plan before source change");
+        let batch_id = uuid::Uuid::new_v4().to_string();
+
+        write_migration(
+            &config,
+            migration_name,
+            &format!(
+                "-- dbm:dialect mysql\n-- dbm:transaction never\n-- dbm:up\nCREATE TABLE {changed_table} (id BIGINT PRIMARY KEY);\n-- dbm:down\nDROP TABLE {changed_table};\n"
+            ),
+        );
+        let result = run_adapter_migration(
+            &config,
+            session.as_mut(),
+            &migrations,
+            None,
+            MigrationOperation {
+                migration: &migrations[0],
+                initial_manifest: &manifest,
+                batch_id: &batch_id,
+                plan_hash: &approved_plan.plan_hash,
+                direction: "up",
+            },
+        )
+        .await;
+        assert!(
+            matches!(result, Err(DbmError::ReconciliationRequired(_))),
+            "unexpected MySQL-family stale-source result: {result:?}"
+        );
+        let after_rejection = session
+            .read_snapshot(&config.config.namespace)
+            .await
+            .expect("read MySQL-family journal after stale-source rejection");
+        assert!(after_rejection.applied.is_empty());
+        assert_eq!(after_rejection.runs.len(), 1);
+        assert_eq!(after_rejection.runs[0].state, "started");
+        assert!(after_rejection.steps.is_empty());
+        session
+            .close()
+            .await
+            .expect("close MySQL-family stale-source session and release native lock");
+
+        let options =
+            mysql_async::OptsBuilder::from_opts(connection_options).prefer_socket(Some(false));
+        let mut observer = mysql_async::Conn::new(options)
+            .await
+            .expect("reconnect observer to disposable MySQL-family server");
+        let effects: i64 = observer
+            .exec_first(
+                "SELECT COUNT(*) FROM information_schema.tables \
+                 WHERE table_schema = DATABASE() AND table_name IN (?, ?)",
+                (initial_table, changed_table),
+            )
+            .await
+            .expect("inspect MySQL-family migration effects")
+            .expect("effect-count query returned a row");
+        observer
+            .disconnect()
+            .await
+            .expect("close MySQL-family effect observer");
+        assert_eq!(effects, 0);
+
+        let run_id = after_rejection.runs[0].run_id.clone();
+        write_migration(&config, migration_name, &initial_sql);
+        let statement = split_sql_statements_for_dialect(
+            &migrations[0].up_sql,
+            crate::migration::SqlDialect::Mysql,
+        )[0];
+        let repair_plan_json = serde_json::json!({
+            "schema_version": "1.0",
+            "summary": "the disposable database has neither table named by either source version",
+            "steps": [{
+                "step_index": 0,
+                "statement_hash": sql_hash(statement),
+                "state": "confirmed_not_applied",
+                "inspection": "information_schema contains neither candidate table",
+            }],
+        })
+        .to_string();
+        let evidence_ref = crate::identity::raw_checksum(
+            b"disposable MySQL-family information_schema confirms neither candidate table exists",
+        );
+        let reconciliation = reconcile_async(
+            &config,
+            ReconcileRequest {
+                run_id: &run_id,
+                operation_result: "operation_not_applied",
+                evidence_ref: &evidence_ref,
+                repair_plan_json: &repair_plan_json,
+                reason: "restore the source and explicitly record the observed absence of DDL",
+                actor: "integration-test",
+                approved: true,
+            },
+        )
+        .await
+        .expect("reconcile the confirmed-not-applied run and release its diagnostic lock");
+        assert_eq!(reconciliation.status, "reconciled");
+        assert_eq!(reconciliation.operation_result, "operation_not_applied");
+        let mut verification = adapter
+            .connect(&config, SessionIntent::ReadWrite)
+            .await
+            .expect("reconnect to verify MySQL-family reconciliation");
+        let reconciled_snapshot = verification
+            .read_snapshot(&config.config.namespace)
+            .await
+            .expect("read reconciled MySQL-family journal");
+        let reconciled_run = reconciled_snapshot
+            .runs
+            .iter()
+            .find(|run| run.run_id == run_id)
+            .expect("find stale-source run after reconciliation");
+        assert_eq!(reconciled_run.state, "reconciled");
+        assert_eq!(
+            reconciled_snapshot
+                .lock
+                .as_ref()
+                .map(|lock| lock.state.as_str()),
+            Some("released")
+        );
+        verification
+            .close()
+            .await
+            .expect("close MySQL-family reconciliation verification session");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires DBM_TEST_MYSQL_URL for a disposable loopback MySQL instance"]
+    async fn local_mysql_rejects_source_changed_after_plan_before_sql() {
+        assert_mysql_rejects_source_changed_after_plan("DBM_TEST_MYSQL_URL", "mysql").await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires DBM_TEST_MARIADB_URL for a disposable loopback MariaDB instance"]
+    async fn local_mariadb_rejects_source_changed_after_plan_before_sql() {
+        assert_mysql_rejects_source_changed_after_plan("DBM_TEST_MARIADB_URL", "mariadb").await;
+    }
+
+    #[tokio::test]
     #[ignore = "requires DBM_TEST_DATABASE_URL for a disposable loopback PostgreSQL instance"]
     async fn local_postgres_adapter_runs_up_failure_and_down_through_shared_fsm() {
         use std::net::IpAddr;
@@ -5214,7 +5657,10 @@ mod tests {
             .read_snapshot(&config.config.namespace)
             .await
             .expect("read PostgreSQL failure journal");
-        assert_eq!(after_failure.metadata_format_version, Some(4));
+        assert_eq!(
+            after_failure.metadata_format_version,
+            Some(crate::storage::METADATA_FORMAT_VERSION)
+        );
         assert_eq!(after_failure.applied.len(), 2);
         assert_eq!(after_failure.runs.len(), 3);
         assert_eq!(after_failure.runs[0].state, "succeeded");
@@ -5300,6 +5746,272 @@ mod tests {
             .await
             .expect("close PostgreSQL cleanup session");
         assert!(directory.path().join("migrations/versioned").is_dir());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires DBM_TEST_DATABASE_URL for a disposable loopback PostgreSQL instance"]
+    async fn local_postgres_serializes_writers_across_namespaces_sharing_schema() {
+        use std::net::IpAddr;
+        use std::time::Duration;
+
+        use tokio_postgres::config::{Config as PostgresConfig, Host, SslMode};
+
+        let (_directory, mut first_config) = setup();
+        let database_url = std::env::var("DBM_TEST_DATABASE_URL")
+            .expect("DBM_TEST_DATABASE_URL must identify a disposable loopback target");
+        let parsed = database_url
+            .parse::<PostgresConfig>()
+            .expect("DBM_TEST_DATABASE_URL must be a valid PostgreSQL connection string");
+        assert_eq!(parsed.get_ssl_mode(), SslMode::Disable);
+        assert!(parsed.get_hosts().iter().all(|host| {
+            match host {
+                Host::Tcp(host) if host.eq_ignore_ascii_case("localhost") => true,
+                Host::Tcp(host) => host
+                    .parse::<IpAddr>()
+                    .is_ok_and(|address| address.is_loopback()),
+                Host::Unix(_) => true,
+            }
+        }));
+        assert!(parsed.get_hostaddrs().iter().all(IpAddr::is_loopback));
+
+        let schema = format!("dbm_namespace_race_{}", uuid::Uuid::new_v4().simple());
+        let table = format!("shared_namespace_object_{}", uuid::Uuid::new_v4().simple());
+        let marker = format!("dbm_namespace_race_{}", uuid::Uuid::new_v4().simple());
+        let (admin, admin_connection) =
+            tokio_postgres::connect(&database_url, tokio_postgres::NoTls)
+                .await
+                .expect("connect to disposable PostgreSQL for schema setup");
+        let admin_task = tokio::spawn(admin_connection);
+        admin
+            .batch_execute(&format!("CREATE SCHEMA {schema}"))
+            .await
+            .expect("create isolated namespace-race schema");
+        set_test_role_search_path(&database_url, &schema, true).await;
+
+        first_config.config.target.driver = "postgres".to_owned();
+        first_config.config.target.database = None;
+        first_config.config.target.url_env = Some("DBM_TEST_DATABASE_URL".to_owned());
+        first_config.config.target.allow_insecure_transport = true;
+        first_config.config.target.environment = crate::config::Environment::Test;
+        first_config.config.namespace = format!("ns_a_{}", uuid::Uuid::new_v4().simple());
+        first_config.database_path = None;
+        let mut second_config = first_config.clone();
+        second_config.config.namespace = format!("ns_b_{}", uuid::Uuid::new_v4().simple());
+        let first_namespace = first_config.config.namespace.clone();
+        let second_namespace = second_config.config.namespace.clone();
+        let first_observer_config = first_config.clone();
+        let second_observer_config = second_config.clone();
+        assert_ne!(first_namespace, second_namespace);
+
+        write_migration(
+            &first_config,
+            "20261024120000000000_shared_namespace_object.sql",
+            &format!(
+                "-- dbm:dialect postgres\n-- dbm:transaction always\n-- dbm:up\nSELECT pg_sleep(3) /* {marker} */;\nCREATE TABLE {table} (id integer PRIMARY KEY);\n-- dbm:down\nDROP TABLE {table};\n"
+            ),
+        );
+        let first_migrations =
+            crate::source::discover(&first_config).expect("discover first namespace migration");
+        let second_migrations =
+            crate::source::discover(&second_config).expect("discover second namespace migration");
+        let first_manifest = manifest_hash(&first_migrations);
+        let second_manifest = manifest_hash(&second_migrations);
+        let adapter = database::adapter_for(&first_config).expect("resolve PostgreSQL adapter");
+        let mut first_session = adapter
+            .connect(&first_config, SessionIntent::ReadWrite)
+            .await
+            .expect("connect first namespace session");
+        let mut second_session = adapter
+            .connect(&second_config, SessionIntent::ReadWrite)
+            .await
+            .expect("connect second namespace session");
+        assert_eq!(
+            first_session.info().schema.as_deref(),
+            Some(schema.as_str())
+        );
+        assert_eq!(
+            second_session.info().schema.as_deref(),
+            Some(schema.as_str())
+        );
+        assert_eq!(
+            first_session.info().database,
+            second_session.info().database
+        );
+
+        let first_snapshot = first_session
+            .read_snapshot(&first_config.config.namespace)
+            .await
+            .expect("read first namespace snapshot");
+        let second_snapshot = second_session
+            .read_snapshot(&second_config.config.namespace)
+            .await
+            .expect("read second namespace snapshot");
+        let first_plan = plan_from_snapshot(&first_config, &first_migrations, &first_snapshot)
+            .expect("plan first namespace migration");
+        let second_plan = plan_from_snapshot(&second_config, &second_migrations, &second_snapshot)
+            .expect("plan second namespace migration");
+        let first_batch_id = uuid::Uuid::new_v4().to_string();
+        let second_batch_id = uuid::Uuid::new_v4().to_string();
+
+        let first_task = tokio::spawn(async move {
+            let result = run_adapter_migration(
+                &first_config,
+                first_session.as_mut(),
+                &first_migrations,
+                None,
+                MigrationOperation {
+                    migration: &first_migrations[0],
+                    initial_manifest: &first_manifest,
+                    batch_id: &first_batch_id,
+                    plan_hash: &first_plan.plan_hash,
+                    direction: "up",
+                },
+            )
+            .await;
+            first_session
+                .close()
+                .await
+                .expect("close first namespace session");
+            result
+        });
+
+        let marker_pattern = format!("%{marker}%");
+        let marker_deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let active_statement = admin
+                .query_one(
+                    "SELECT EXISTS (SELECT 1 FROM pg_stat_activity \
+                     WHERE datname = current_database() AND state = 'active' AND query LIKE $1)",
+                    &[&marker_pattern],
+                )
+                .await
+                .expect("observe first migration statement")
+                .get::<_, bool>(0);
+            if active_statement {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < marker_deadline,
+                "first namespace migration did not reach its pause statement"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        let second_task = tokio::spawn(async move {
+            let result = run_adapter_migration(
+                &second_config,
+                second_session.as_mut(),
+                &second_migrations,
+                None,
+                MigrationOperation {
+                    migration: &second_migrations[0],
+                    initial_manifest: &second_manifest,
+                    batch_id: &second_batch_id,
+                    plan_hash: &second_plan.plan_hash,
+                    direction: "up",
+                },
+            )
+            .await;
+            second_session
+                .close()
+                .await
+                .expect("close second namespace session");
+            result
+        });
+
+        let contention_deadline = tokio::time::Instant::now() + Duration::from_millis(300);
+        loop {
+            let active_marked_statements = admin
+                .query_one(
+                    "SELECT COUNT(*) FROM pg_stat_activity \
+                     WHERE datname = current_database() AND state = 'active' AND query LIKE $1",
+                    &[&marker_pattern],
+                )
+                .await
+                .expect("observe concurrent namespace migration statements")
+                .get::<_, i64>(0);
+            assert_eq!(
+                active_marked_statements, 1,
+                "second namespace must not execute while the first holds the shared schema lock"
+            );
+            assert!(
+                !second_task.is_finished(),
+                "second namespace must remain pending while the first migration is paused"
+            );
+            if tokio::time::Instant::now() >= contention_deadline {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+
+        let first_result = first_task
+            .await
+            .expect("join first namespace migration task")
+            .expect("first namespace migration succeeds");
+        assert!(first_result);
+        let second_result = second_task
+            .await
+            .expect("join second namespace migration task")
+            .expect_err("second namespace conflicts with the shared schema object");
+        assert!(matches!(second_result, DbmError::Execution(_)));
+
+        let mut first_observer = adapter
+            .connect(&first_observer_config, SessionIntent::ReadOnly)
+            .await
+            .expect("connect first namespace observer");
+        let first_after = first_observer
+            .read_snapshot(&first_namespace)
+            .await
+            .expect("read first namespace result");
+        first_observer
+            .close()
+            .await
+            .expect("close first namespace observer");
+        let mut second_observer = adapter
+            .connect(&second_observer_config, SessionIntent::ReadOnly)
+            .await
+            .expect("connect second namespace observer");
+        let second_after = second_observer
+            .read_snapshot(&second_namespace)
+            .await
+            .expect("read second namespace result");
+        second_observer
+            .close()
+            .await
+            .expect("close second namespace observer");
+        assert_eq!(first_after.applied.len(), 1);
+        assert_eq!(first_after.runs.len(), 1);
+        assert_eq!(first_after.runs[0].state, "succeeded");
+        assert!(second_after.applied.is_empty());
+        assert_eq!(second_after.runs.len(), 1);
+        assert_eq!(second_after.runs[0].state, "failed");
+        assert_eq!(
+            first_after.lock.as_ref().map(|lock| lock.state.as_str()),
+            Some("released")
+        );
+        assert_eq!(
+            second_after.lock.as_ref().map(|lock| lock.state.as_str()),
+            Some("released")
+        );
+        let shared_table_count: i64 = admin
+            .query_one(
+                "SELECT COUNT(*) FROM information_schema.tables \
+                 WHERE table_schema = $1 AND table_name = $2",
+                &[&schema, &table],
+            )
+            .await
+            .expect("inspect shared schema object")
+            .get(0);
+        assert_eq!(shared_table_count, 1);
+
+        set_test_role_search_path(&database_url, &schema, false).await;
+        admin
+            .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
+            .await
+            .expect("drop isolated namespace-race schema");
+        drop(admin);
+        admin_task.abort();
+        let _ = admin_task.await;
     }
 
     #[tokio::test]

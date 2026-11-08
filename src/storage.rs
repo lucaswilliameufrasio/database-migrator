@@ -1903,10 +1903,45 @@ mod tests {
         assert_eq!(upgraded_v4.applied.len(), 1);
         assert_eq!(upgraded_v4.applied[0].migration_key, "a".repeat(64));
 
+        connection
+            .execute_batch("CREATE TABLE schema_migration_runs_v4 (collision INTEGER);")
+            .expect("install a name collision after the first upgrade rewrite step");
+        let failed_upgrade = connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .expect("begin fault-injected format 4 upgrade");
+        assert!(
+            upgrade_metadata_v4_to_current(&failed_upgrade, "2026-10-24T00:00:03.000000Z").is_err()
+        );
+        failed_upgrade
+            .rollback()
+            .expect("roll back failed format 4 upgrade");
+        assert_eq!(
+            metadata_v4_presence(&connection).expect("count tables after failed upgrade"),
+            8
+        );
+        let preserved_v4 =
+            read_snapshot_from_connection(&connection, "default").expect("read intact v4 state");
+        assert_eq!(preserved_v4.metadata_format_version, Some(4));
+        assert_eq!(preserved_v4.applied.len(), 1);
+        assert_eq!(preserved_v4.applied[0].migration_key, "a".repeat(64));
+        let partial_rename_exists: bool = connection
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM sqlite_master \
+                 WHERE type = 'table' AND name IN \
+                   ('schema_migrations_v4', 'schema_migration_steps_v4'))",
+                [],
+                |row| row.get(0),
+            )
+            .expect("inspect names left by failed upgrade");
+        assert!(!partial_rename_exists);
+        connection
+            .execute_batch("DROP TABLE schema_migration_runs_v4;")
+            .expect("remove injected upgrade name collision");
+
         let transaction = connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .expect("begin explicit v4 upgrade");
-        upgrade_metadata_v4_to_current(&transaction, "2026-10-24T00:00:03.000000Z")
+        upgrade_metadata_v4_to_current(&transaction, "2026-10-24T00:00:04.000000Z")
             .expect("upgrade v4 to v5");
         transaction.commit().expect("commit v4 to v5 upgrade");
 

@@ -2758,7 +2758,7 @@ mod tests {
         session
             .initialize_metadata("2026-10-24T12:00:00.000000Z")
             .await
-            .expect("bootstrap format 4 metadata");
+            .expect("bootstrap current metadata");
         session.commit().await.expect("commit metadata bootstrap");
         session
             .release_lock()
@@ -3246,7 +3246,10 @@ mod tests {
             .await;
         assert!(cleanup.is_ok(), "isolated database cleanup must succeed");
         let snapshot = result.expect("MySQL/MariaDB legacy import adapter conformance");
-        assert_eq!(snapshot.metadata_format_version, Some(4));
+        assert_eq!(
+            snapshot.metadata_format_version,
+            Some(crate::storage::METADATA_FORMAT_VERSION)
+        );
         assert_eq!(snapshot.legacy_imports.len(), 3);
         assert_eq!(snapshot.legacy_import_events.len(), 7);
         assert_eq!(snapshot.legacy_applied.len(), 4);

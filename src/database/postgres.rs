@@ -3854,6 +3854,200 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires DBM_TEST_DATABASE_URL for a disposable loopback PostgreSQL instance"]
+    async fn local_postgres_v4_upgrade_failure_rolls_back_prior_ddl() {
+        let (_directory, config) = local_postgres_config(true, None);
+        let adapter = PostgresAdapter;
+        let schema = create_isolated_schema(&adapter, &config).await;
+        let mut session =
+            connect_in_schema(&adapter, &config, &schema, SessionIntent::ReadWrite).await;
+        session
+            .acquire_lock(Duration::from_secs(2))
+            .await
+            .expect("acquire PostgreSQL session lock for failed upgrade test");
+        session.begin().await.expect("begin metadata bootstrap");
+        session
+            .initialize_metadata("2026-11-07T12:00:00Z")
+            .await
+            .expect("initialize current metadata fixture");
+        session.commit().await.expect("commit metadata bootstrap");
+
+        session
+            .begin()
+            .await
+            .expect("begin native migration and journal fixture");
+        session
+            .execute_statement(
+                "INSERT INTO schema_migrations \
+                 (namespace, migration_key, kind, native_version, filename, source_path, \
+                  description, authoring_type, content_checksum, apply_order, applied_at) \
+                 VALUES ('default', repeat('a', 64), 'versioned', \
+                         '20261024120000000000', '20261024120000000000_probe.sql', \
+                         'migrations/versioned/20261024120000000000_probe.sql', \
+                         'probe', 'sql', 'sha256:fixture', 1, CURRENT_TIMESTAMP); \
+                 INSERT INTO schema_migration_runs \
+                 (run_id, batch_id, namespace, migration_key, migration_version, direction, \
+                  state, attempt, created_at, checksum_at_execution, plan_hash, actor_kind) \
+                 VALUES ('upgrade-fault-run', 'upgrade-fault-batch', 'default', repeat('a', 64), \
+                         '20261024120000000000', 'up', 'succeeded', 1, CURRENT_TIMESTAMP, \
+                         'sha256:fixture', 'sha256:plan', 'human'); \
+                 INSERT INTO schema_migration_steps \
+                 (run_id, step_index, step_key, direction, statement_hash, statement_kind, \
+                  transaction_class, state, started_at, attempt_id) \
+                 VALUES ('upgrade-fault-run', 0, 'upgrade-fault-step', 'up', 'sha256:step', \
+                         'CREATE', 'transactional', 'acknowledged', CURRENT_TIMESTAMP, \
+                         'upgrade-fault-attempt');",
+            )
+            .await
+            .expect("seed native state and journal before metadata downgrade");
+        session
+            .commit()
+            .await
+            .expect("commit native state and journal fixture");
+
+        session
+            .begin()
+            .await
+            .expect("begin isolated v5-to-v4 fixture conversion");
+        session
+            .execute_statement(
+                "ALTER TABLE schema_migrations \
+                    DROP CONSTRAINT schema_migrations_check; \
+                 ALTER TABLE schema_migrations \
+                    DROP COLUMN repeatable_name CASCADE; \
+                 ALTER TABLE schema_migrations \
+                    DROP CONSTRAINT schema_migrations_kind_check, \
+                    ADD CONSTRAINT schema_migrations_kind_check \
+                        CHECK (kind IN ('versioned', 'legacy')), \
+                    ADD CONSTRAINT schema_migrations_legacy_shape_check CHECK (\
+                        (kind = 'versioned' AND native_version IS NOT NULL \
+                         AND original_version IS NULL AND legacy_import_id IS NULL \
+                         AND origin_tool IS NULL) OR \
+                        (kind = 'legacy' AND native_version IS NULL \
+                         AND original_version IS NOT NULL AND legacy_import_id IS NOT NULL \
+                         AND origin_tool IS NOT NULL AND origin_database_identity IS NOT NULL \
+                         AND origin_identity IS NOT NULL AND verification_status IS NOT NULL \
+                         AND observed_at IS NOT NULL)); \
+                 ALTER TABLE schema_migration_runs \
+                    DROP CONSTRAINT schema_migration_runs_direction_check, \
+                    ALTER COLUMN migration_version TYPE VARCHAR(20), \
+                    ADD CONSTRAINT schema_migration_runs_direction_check \
+                        CHECK (direction IN ('up', 'down', 'reconcile')); \
+                 UPDATE schema_migration_meta \
+                    SET metadata_format_version = 4 WHERE singleton = 1;",
+            )
+            .await
+            .expect("convert isolated current metadata fixture to format 4");
+        session
+            .commit()
+            .await
+            .expect("commit isolated format 4 fixture conversion");
+        let before = session
+            .read_snapshot("default")
+            .await
+            .expect("read isolated format 4 fixture");
+        assert_eq!(before.metadata_format_version, Some(4));
+        assert_eq!(before.applied.len(), 1);
+        assert_eq!(before.runs.len(), 1);
+        assert_eq!(before.steps.len(), 1);
+
+        let database_url = std::env::var("DBM_TEST_DATABASE_URL")
+            .expect("DBM_TEST_DATABASE_URL remains configured for the test");
+        let (observer, observer_connection) =
+            tokio_postgres::connect(&database_url, tokio_postgres::NoTls)
+                .await
+                .expect("connect to install PostgreSQL metadata-upgrade fault");
+        let observer_task = tokio::spawn(observer_connection);
+        observer
+            .batch_execute(&format!("SET search_path TO {schema}, public"))
+            .await
+            .expect("scope PostgreSQL fault-injection setup to the isolated schema");
+        let sequence = format!("{schema}.metadata_upgrade_fault_count");
+        let function = format!("reject_metadata_upgrade_{}", uuid::Uuid::new_v4().simple());
+        let event_trigger = format!("reject_metadata_upgrade_{}", uuid::Uuid::new_v4().simple());
+        observer
+            .batch_execute(&format!(
+                "CREATE SEQUENCE {sequence}; \
+                 CREATE FUNCTION {schema}.{function}() RETURNS event_trigger \
+                 LANGUAGE plpgsql AS $$ BEGIN \
+                     IF position('ALTER TABLE schema_migrations' IN current_query()) > 0 \
+                        AND nextval('{sequence}') = 2 THEN \
+                         RAISE EXCEPTION 'intentional metadata upgrade fault injection'; \
+                     END IF; \
+                 END $$; \
+                 CREATE EVENT TRIGGER {event_trigger} ON ddl_command_start \
+                 WHEN TAG IN ('ALTER TABLE') EXECUTE FUNCTION {schema}.{function}()"
+            ))
+            .await
+            .expect("install fault after the first format 4-to-5 ALTER TABLE");
+
+        session
+            .begin()
+            .await
+            .expect("begin PostgreSQL metadata upgrade transaction");
+        let upgrade_result = session.upgrade_metadata_to_current().await;
+        let rollback_result = session.rollback().await;
+        let cleanup_result = observer
+            .batch_execute(&format!(
+                "DROP EVENT TRIGGER {event_trigger}; \
+                 DROP FUNCTION {schema}.{function}()"
+            ))
+            .await;
+        let fault_count_result = observer
+            .query_one(&format!("SELECT last_value FROM {sequence}"), &[])
+            .await
+            .map(|row| row.get::<_, i64>(0));
+        let repeatable_column_result = observer
+            .query_one(
+                "SELECT EXISTS(SELECT 1 FROM information_schema.columns \
+                 WHERE table_schema = $1 AND table_name = 'schema_migrations' \
+                   AND column_name = 'repeatable_name')",
+                &[&schema],
+            )
+            .await
+            .map(|row| row.get::<_, bool>(0));
+        drop(observer);
+        observer_task.abort();
+        let _ = observer_task.await;
+
+        assert!(
+            matches!(&upgrade_result, Err(DbmError::Execution(_))),
+            "unexpected PostgreSQL metadata-upgrade result: {upgrade_result:?}"
+        );
+        rollback_result.expect("roll back the failed PostgreSQL metadata-upgrade transaction");
+        cleanup_result.expect("remove PostgreSQL metadata-upgrade event trigger");
+        assert_eq!(
+            fault_count_result.expect("read PostgreSQL DDL fault-injection count"),
+            2,
+            "fault must occur at the second ALTER TABLE"
+        );
+        assert!(
+            !repeatable_column_result
+                .expect("inspect the v5-only repeatable_name column after rollback")
+        );
+
+        let after = session
+            .read_snapshot("default")
+            .await
+            .expect("read metadata after injected upgrade rollback");
+        assert_eq!(after.metadata_format_version, Some(4));
+        assert_eq!(after.applied.len(), 1);
+        assert_eq!(after.runs.len(), 1);
+        assert_eq!(after.steps.len(), 1);
+        assert_eq!(after.runs[0].run_id, "upgrade-fault-run");
+
+        session
+            .release_lock()
+            .await
+            .expect("release PostgreSQL metadata-upgrade test lock");
+        session
+            .close()
+            .await
+            .expect("close PostgreSQL metadata-upgrade test session");
+        drop_isolated_schema(&adapter, &config, &schema).await;
+    }
+
+    #[tokio::test]
     #[ignore = "requires DBM_TEST_DATABASE_URL and DBM_TEST_POSTGRES_CA_FILE for a local TLS PostgreSQL instance"]
     async fn local_postgres_tls_connection_validates_a_configured_ca() {
         let (_directory, config) = local_postgres_config(false, Some("DBM_TEST_POSTGRES_CA_FILE"));
@@ -3951,7 +4145,10 @@ mod tests {
             session.release_lock().await?;
 
             let snapshot = session.read_snapshot("default").await?;
-            assert_eq!(snapshot.metadata_format_version, Some(4));
+            assert_eq!(
+                snapshot.metadata_format_version,
+                Some(crate::storage::METADATA_FORMAT_VERSION)
+            );
             assert_eq!(snapshot.legacy_imports.len(), 3);
             assert_eq!(snapshot.legacy_import_events.len(), 7);
             assert_eq!(snapshot.legacy_applied.len(), 4);
