@@ -422,3 +422,28 @@ each of those versions. Databases were newly created and servers published only
 on loopback. A broad MySQL-name filter initially selected one MySQL-vendor-only
 engine assertion on MariaDB; exact MariaDB-compatible filters passed. The
 remaining G11 blockers are unchanged.
+
+**G11 scope decisions and latest-stable PostgreSQL verification — 2026-11-08:**
+the project owner selected the current stable PostgreSQL line instead of
+requiring recovery scenario #11 on PostgreSQL 17.11. The official
+[versioning page](https://www.postgresql.org/support/versioning/) lists 18.6 as
+the current minor of the latest stable major; 19 is a release candidate. On a
+disposable rootless-Docker PostgreSQL 18.6 container, with `--pull=never`, no
+persistent volume, and only a loopback-published port,
+`cli_process_death_at_postgres_recovery_boundaries_keeps_runs_unresolved` and
+`engine::tests::local_postgres_rejects_source_changed_after_plan_before_sql`
+each passed once. The container was removed. The project owner also accepted
+the existing CLI contract for #12: `plan` is read-only, `up` recalculates, and
+there is no reusable approved-plan CLI flow. Engine-level source revalidation
+is the applicable criterion; no new CLI flow is required or authorized.
+
+An informational performance job was added to GitHub Actions. It waits for the
+quality and supply-chain jobs, builds the release CLI, records runner/toolchain
+metadata, and runs the documented 1,000-migration offline validation benchmark
+with 10 samples. It has not run remotely yet; the CI-hardware result remains
+pending the authorized push and successful workflow execution. The historical
+security-review note above refers to a source-only review recorded at commit
+`9a8dd95c3143fe9adc59f1c51fba820ad05db129`; its full report and four structured
+`needs_validation` records are said to be maintained outside this repository
+and were not available in the inspected checkout. Their candidate validations
+remain unverified. G11 is still partial/pending.

@@ -12,7 +12,7 @@ jobs:
     name: Format, lint, test, and build
     runs-on: ubuntu-latest
     steps:
-      # Verified upstream release 2026-10-23:
+      # Revalidated against the canonical upstream release on 2026-11-08:
       # https://github.com/actions/checkout/releases/tag/v7.0.1
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -43,7 +43,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      # Verified upstream release 2026-10-23:
+      # Revalidated against the canonical upstream release on 2026-11-08:
       # https://github.com/actions/checkout/releases/tag/v7.0.1
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -61,7 +61,7 @@ jobs:
         run: sh scripts/supply-chain.sh
 
       - name: Upload CycloneDX SBOM
-        # Verified canonical upstream release 2026-10-26:
+        # Revalidated against the canonical upstream release on 2026-11-08:
         # https://github.com/actions/upload-artifact/releases/tag/v7.0.2
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -69,3 +69,39 @@ jobs:
           path: bom.json
           if-no-files-found: error
           retention-days: 30
+
+  performance:
+    name: Offline validation performance baseline
+    needs:
+      - quality
+      - supply-chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # Revalidated against the canonical upstream release on 2026-11-08:
+      # https://github.com/actions/checkout/releases/tag/v7.0.1
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal
+
+      - name: Record runner and toolchain
+        run: |
+          printf 'runner_os=%s\n' "${RUNNER_OS:-unknown}"
+          printf 'runner_arch=%s\n' "${RUNNER_ARCH:-unknown}"
+          printf 'runner_image=%s %s\n' "${ImageOS:-unknown}" "${ImageVersion:-unknown}"
+          uname -srmo
+          grep -m 1 '^model name' /proc/cpuinfo || true
+          nproc
+          free -h
+          rustc --version --verbose
+          cargo --version
+
+      - name: Build optimized CLI
+        run: cargo build --release --bin dbm --locked
+
+      - name: Measure offline validation baseline (informational)
+        env:
+          DBM_BENCH_TMPDIR: ${{ runner.temp }}
+        run: sh scripts/bench-validate.sh target/release/dbm 1000 10

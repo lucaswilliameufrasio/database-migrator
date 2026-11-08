@@ -1591,6 +1591,26 @@ acessíveis, não o relatório nem os quatro registros. O objetivo de um segundo
 hardware de referência da CI também permanece sem evidência. Portanto G11
 continua parcial/pendente; G12 permanece fora do escopo, sem push, tag ou release.
 
+**Retomada G11 por decisão do responsável — 2026-11-08:** a página oficial de
+[versionamento PostgreSQL](https://www.postgresql.org/support/versioning/)
+lista 18.6 como minor corrente da major estável mais recente; PostgreSQL 19
+permanece release candidate. O responsável selecionou essa linha estável para
+G11 em vez de exigir o cenário #11 em 17.11. Os testes
+`cli_process_death_at_postgres_recovery_boundaries_keeps_runs_unresolved` e
+`engine::tests::local_postgres_rejects_source_changed_after_plan_before_sql`
+passaram uma vez cada contra `postgres:18.6` descartável, iniciado com
+`--pull=never`, sem volume persistente e publicado apenas em `127.0.0.1`; o
+container foi removido. A decisão preserva 17.11 na matriz provisória, sem
+afirmar cobertura desse boundary nessa versão. O responsável também aceitou o
+contrato CLI atual para #12: `plan` é somente leitura, `up` recalcula, e não há
+fluxo de plano aprovado reutilizável a implementar. A cobertura aplicável é a
+revalidação source→engine já verificada; a subparte de aprovação CLI não se
+aplica até que exista tal recurso. O workflow agora mede, de forma informativa,
+`validate` offline de 1.000 migrations em runner `ubuntu-latest`, após os gates
+de qualidade e supply chain. A medição remota ainda depende do push autorizado e
+do resultado desse job. G11 continua pendente pelas lacunas de segurança,
+validações externas, matriz restante e performance CI.
+
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 
 **G12** — Tag estável com release notes, checksums assinados quando possível, binários homologados, changelog, upgrade guide, compatibilidade semver, matriz de testes publicada e exemplos de CI de deploy seguros.
