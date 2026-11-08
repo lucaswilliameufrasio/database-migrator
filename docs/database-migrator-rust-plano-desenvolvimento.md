@@ -1607,9 +1607,18 @@ fluxo de plano aprovado reutilizável a implementar. A cobertura aplicável é a
 revalidação source→engine já verificada; a subparte de aprovação CLI não se
 aplica até que exista tal recurso. O workflow agora mede, de forma informativa,
 `validate` offline de 1.000 migrations em runner `ubuntu-latest`, após os gates
-de qualidade e supply chain. A medição remota ainda depende do push autorizado e
-do resultado desse job. G11 continua pendente pelas lacunas de segurança,
-validações externas, matriz restante e performance CI.
+de qualidade e supply chain. A execução `42528280279` no commit
+`04d8f132da27f47d599b1e8dd1927e3882ce3bed` passou os três jobs. No runner
+`ubuntu24` imagem `20261101.360.1` (Linux x86_64, kernel
+`7.0.0-1017-azure`, AMD EPYC 7763), com `rustc`/Cargo 1.99.1 e build release, o
+harness fez um warm-up e dez medições: 15, 15, 15, 15, 15, 15, 17, 16, 15 e 15
+ms. Mediana 15 ms, máximo 17 ms, incluindo startup do processo; o harness
+confirmou 1.000 migrations e ausência de criação do banco SQLite. Isso satisfaz
+o objetivo inicial de menos de um segundo nesta campanha, mas o job permanece
+informativo, não um gate de regressão, e uma campanha não caracteriza variação
+entre imagens/runners. Log: [CI 42528280279](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42528280279).
+G11 continua pendente pelas lacunas de segurança, validações externas e matriz
+restante.
 
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 

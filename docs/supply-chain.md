@@ -440,9 +440,19 @@ is the applicable criterion; no new CLI flow is required or authorized.
 An informational performance job was added to GitHub Actions. It waits for the
 quality and supply-chain jobs, builds the release CLI, records runner/toolchain
 metadata, and runs the documented 1,000-migration offline validation benchmark
-with 10 samples. It has not run remotely yet; the CI-hardware result remains
-pending the authorized push and successful workflow execution. The historical
-security-review note above refers to a source-only review recorded at commit
+with 10 samples. Run `42528280279` for commit
+`04d8f132da27f47d599b1e8dd1927e3882ce3bed` passed all three jobs. The performance
+runner was `ubuntu24` image `20261101.360.1` (Linux x86_64, kernel
+`7.0.0-1017-azure`, AMD EPYC 7763), with Rust/Cargo 1.99.1 and a release build.
+After one warm-up, the ten `validate` samples over 1,000 generated migrations
+were 15, 15, 15, 15, 15, 15, 17, 16, 15, and 15 ms (median 15 ms, max 17 ms).
+The timing includes process startup; the harness checked the returned migration
+count and verified that read-only validation created no SQLite database. This
+campaign met the initial one-second objective, but the job is informational and
+does not enforce a threshold; one run does not characterize variance across
+runner images. See the [CI run](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42528280279).
+
+The historical security-review note above refers to a source-only review recorded at commit
 `9a8dd95c3143fe9adc59f1c51fba820ad05db129`; its full report and four structured
 `needs_validation` records are said to be maintained outside this repository
 and were not available in the inspected checkout. Their candidate validations
