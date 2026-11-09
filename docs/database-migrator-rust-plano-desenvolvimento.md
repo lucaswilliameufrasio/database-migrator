@@ -1681,9 +1681,11 @@ rerun, performance também passou. O resultado final daquele run foi verde, mas 
 falha inicial permanece registrada. A trigger exclusiva do teste passou de 20M
 para 100M iterações para ampliar a janela; três execuções focadas e o gate local
 completo (144 passed, 49 ignored, zero falhas) passaram após essa alteração. A
-validação remota da nova trigger ainda está pendente; nenhuma lógica de produção
-foi alterada. G11 continua parcial pelas lacunas de auditoria de segurança e da
-matriz registradas em `docs/recovery-drills.md`.
+CI remota do SHA `de529ce0a9e0b025a99ffc766cb8cea9796a740f`, run
+`42538270662`, também passou nos três jobs (quality, supply-chain/SBOM e
+performance informativa). Nenhuma lógica de produção foi alterada. G11 continua
+parcial pelas lacunas de auditoria de segurança e da matriz registradas em
+`docs/recovery-drills.md`.
 
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 

@@ -27,6 +27,11 @@ publishing a package, uploading release assets, or running database migrations.
   This verifies those gates for that SHA; it does not close the complete security
   review or remaining fault-injection matrix, so the combined G11 checkbox stays
   open.
+- Commit `de529ce0a9e0b025a99ffc766cb8cea9796a740f` passed all three jobs in CI
+  run [42538270662](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42538270662),
+  including the widened SQLite #11 test, dependency audit/SBOM, and informational
+  performance baseline. This closes remote verification for that test-only
+  adjustment; it does not close the security review or the remaining matrix rows.
 - [x] Draft changelog, upgrade guide, support matrix, and release checklist
       prepared.
 - [x] CI configuration for dependency audit and ephemeral CycloneDX SBOM
