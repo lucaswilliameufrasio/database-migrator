@@ -43,8 +43,13 @@ publishing a package, uploading release assets, or running database migrations.
   server runs passed on PostgreSQL 17.11 and MariaDB 10.11.14/11.4.13; the 45-test
   opt-in suite passed on PostgreSQL 17.11/MySQL 8.4.13/MariaDB 11.8.9 and on each
   older MariaDB line paired with PostgreSQL 18.6/MySQL 8.4.13. TLS cases were
-  separately verified where recorded in `docs/recovery-drills.md`. These are
-  local results. Corrected harness commit `8d47569` passed remote CI run
+  separately verified where recorded in `docs/recovery-drills.md`. On the current
+  checkout, the 45-test opt-in selection also passed serially with PostgreSQL
+  18.6/MySQL 8.4.13 and each MariaDB 10.11.14, 11.4.13, and 11.8.9; four TLS/
+  PgBouncer tests were excluded and their separate evidence remains recorded.
+  The default-parallel attempt failed in library tests and its cause is not
+  isolated. These are local results. Corrected harness commit `8d47569` passed
+  remote CI run
   `42548111248`; that run predates the current AI-context correction and does not
   verify it. The subsequent AI-context commit `0805472` failed quality in CI run
   `42553905101` because the SQLite #11 harness did not observe rollback within

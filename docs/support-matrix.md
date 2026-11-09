@@ -19,6 +19,16 @@ Mutations against PostgreSQL, MySQL, and MariaDB require metadata format 5;
 read-only inspection supports the formats described in the README. Metadata
 upgrades are explicit and can fail closed when an upgrade is interrupted.
 
+The current-checkout 45-test opt-in workspace selection also passed on
+2026-11-09 with PostgreSQL 18.6 and MySQL 8.4.13 paired separately with
+MariaDB 10.11.14, 11.4.13, and 11.8.9. PgBouncer and three TLS cases were
+excluded from this selection; those have separate evidence. Execution used
+fresh rootless loopback containers and `--test-threads=1`. The initial parallel
+attempt failed with lock timeouts, a MariaDB EOF, and a PostgreSQL assertion;
+the cause remains unisolated. See `recovery-drills.md` for exact image digests
+and logs. This strengthens the named versions but does not complete the support
+matrix or security review.
+
 ## Rust, operating systems, and optional integrations
 
 | Area | Declared/current evidence | Qualification |

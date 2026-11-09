@@ -1758,6 +1758,19 @@ formatação, Clippy, build, exemplos e supply-chain). O commit seguinte
 registrada como timeout de observação do harness, não como evidência de commit
 dos dados da migration. G11 segue ativo e sem aprovação.
 
+**Reexecução da suíte opt-in da matriz — 2026-11-09:** no checkout
+`82f739911b09275335940b44fd07313f5b8480d3`, a seleção de 45 testes ignorados
+passou serialmente em três combinações descartáveis, sempre com PostgreSQL 18.6
+e MySQL 8.4.13, pareados separadamente com MariaDB 10.11.14, 11.4.13 e 11.8.9
+(16 library/engine, 23 CLI, 3 DSL, 3 import por execução). PgBouncer e três casos
+TLS foram excluídos por fixtures ausentes; permanecem evidenciados
+separadamente. Uma tentativa paralela anterior falhou com timeouts de locks,
+EOF do MariaDB e uma assertion PostgreSQL; a causa não foi isolada e ela não é
+contada como aprovação nem defeito confirmado. A verificação serial e os logs
+estão descritos em `docs/recovery-drills.md`. Permanecem pendentes a revisão de
+segurança identificável/completa, a execução paralela confiável e as lacunas de
+plataformas/versões ainda não homologadas; G11 não está aprovado.
+
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 
 **G12** — Tag estável com release notes, checksums assinados quando possível, binários homologados, changelog, upgrade guide, compatibilidade semver, matriz de testes publicada e exemplos de CI de deploy seguros.

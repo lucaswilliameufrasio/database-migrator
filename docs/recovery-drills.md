@@ -49,15 +49,16 @@ section 13.3. Current source evidence is narrower than the complete matrix:
 | Runner absent, incompatible, timed out, or emitting extra frames | `tests/runner_protocol.rs::missing_runner_timeout_and_extra_frames_fail_without_partial_sql` and adjacent handshake tests | Covered locally; timeout test uses a disposable project |
 | Complete crash matrix across supported adapters and versions | Targeted scenarios are tracked below. The repository-wide source-only security review on 2026-10-26 did not execute target code or add fault-injection evidence. | Partial; driver/version coverage and additional boundaries remain pending; G11 is not approved |
 
-### Matrix traceability as of 2026-11-08
+### Matrix traceability as of 2026-11-09
 
 The numbered rows below correspond to section 13.3 of the development plan.
 They are a gap inventory, not a claim that source inspection or a related test
 proves a whole scenario across every database and failure boundary.
 
 The complete 45-test workspace runs recorded below additionally cover every
-applicable MariaDB boundary #1–#10 and #12 on 10.11.14 and 11.4.13; the row-level
-details below include the earlier focused runs and the combined-suite extension.
+applicable MariaDB boundary #1–#10 and #12 on 10.11.14 and 11.4.13, with a
+current-checkout repeat also on 11.8.9; row-level details include earlier focused
+runs and the combined-suite extensions.
 Scenario #11 remains inapplicable to MySQL/MariaDB because their accepted
 execution profile requires `transaction=never`.
 
@@ -75,6 +76,33 @@ execution profile requires `transaction=never`.
 | 10 | Failure during metadata bootstrap/upgrade | `tests/cli.rs::cli_postgres_metadata_bootstrap_failure_rolls_back_all_reserved_tables` injects a PostgreSQL DDL-start failure midway through bootstrap and confirms no reserved metadata tables remain; passed twice each on disposable loopback PostgreSQL 16.15 and 18.6. `database::postgres::tests::local_postgres_v4_upgrade_failure_rolls_back_prior_ddl` injects failure on the second `ALTER TABLE` of v4→v5, confirms the prior `ADD COLUMN` was rolled back, the v4 identity and native/run/step rows remain, and `repeatable_name` is absent; passed twice each on PostgreSQL 16.15 and 18.6. `cli_mysql_metadata_bootstrap_failure_preserves_partial_state_for_reconciliation` and its MariaDB counterpart pause the third bootstrap DDL, create a conflicting object, then verify `RECONCILIATION_REQUIRED`, two created metadata tables, no identity or migration effect, and `STATE_DIVERGED` on retry; passed twice each on disposable loopback MySQL 9.7.4 and MariaDB 13.0.2. `cli_mysql_metadata_upgrade_failure_preserves_partial_ddl_for_reconciliation` and the MariaDB counterpart disconnect before the second v4→v5 DDL after the first `schema_migrations` ALTER committed. Both confirm `RECONCILIATION_REQUIRED`, v4 identity plus the committed repeatable column, intact native/run/step rows, unchanged v4 run-journal column, no staging tables, and a `STATE_DIVERGED` retry with no further mutation; passed twice each on disposable loopback MySQL 8.4.11/8.4.13/9.7.4 and MariaDB 11.8.2/11.8.9/13.0.2. SQLite bootstrap is fault-injected through the real adapter session: a pre-existing table collides with the index created after the first metadata tables, initialization fails, explicit transaction rollback leaves zero reserved metadata tables and preserves the collision object. `database::sqlite::tests::sqlite_metadata_bootstrap_failure_rolls_back_partial_tables` passed twice locally. `storage::tests::metadata_v3_upgrade_preserves_native_state_and_adds_relational_import_tables` separately injects a name collision partway through SQLite v4→v5 upgrade and verifies transactional rollback preserves intact v4 metadata. Other bootstrap/upgrade versions remain unverified. |
 | 11 | Rollback then crash before run recorded | `sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved` first applies a committed baseline, then fails a transactional migration after DDL. A test-only SQLite trigger slows the separate failed-run update; the test observes the rollback journal disappear and reappear for that update, kills the CLI before commit, and verifies the baseline remains applied, failed DDL is absent, the run remains `started` with zero steps, the diagnostic lock remains `observed_active`, and retry is safety-blocked. With the original 20M-iteration trigger, the test passed three isolated local runs, but the first quality attempt in CI run `42536081938` on `199cc07dd0a0594b4d8b7b110283d72c27a1262d` failed because the CLI exited with status 6 before the test captured the intended observation window (`started`, journal, and rollback had all been observed). Rerunning the failed job on that same SHA passed; the final workflow run passed all three jobs. The test-only trigger was increased to 100M iterations to widen the observation window; the focused test passed three consecutive local runs, the full local gate passed (144 passed, 49 ignored, zero failures), and the updated test passed in CI run `42538270662` on `de529ce0a9e0b025a99ffc766cb8cea9796a740f` (all three workflow jobs passed). The combined PostgreSQL CLI boundary test pauses failed-run persistence and passed twice each on disposable loopback PostgreSQL 16.15 and 18.6; it passed again on PostgreSQL 18.6 on 2026-11-08. PostgreSQL 18.6 is the current stable minor of the latest stable major per the official versioning page; the project owner selected that current stable line as the required G11 target. A supplemental PostgreSQL 17.11 run also passed this rollback-before-record boundary on 2026-11-08; it is not an added requirement. Other PostgreSQL versions remain unverified. MySQL/MariaDB are not applicable to this rollback boundary under ADR-016: their profile requires `transaction=never`; `source::tests::mysql_migrations_require_explicit_never_and_match_the_target_dialect` verifies that `transaction=always` is rejected during discovery before database execution. No transactional production contract was changed. |
 | 12 | Plan and source changed between approval and execution | `engine::tests::adapter_rejects_source_changed_after_plan_before_sql` captures a SQLite plan and manifest, changes the source, and verifies execution returns `DbmError::Safety`, records no steps, and creates neither version of the table; passed twice locally. `engine::tests::local_postgres_rejects_source_changed_after_plan_before_sql` exercises the same engine boundary through PostgreSQL, confirming `Safety`, a failed run without steps/applied rows, a released lock, and neither DDL effect; passed twice each on disposable loopback PostgreSQL 16.15 and 18.6, and again on 18.6 on 2026-11-08. `engine::tests::local_mysql_rejects_source_changed_after_plan_before_sql` and the MariaDB counterpart confirm changed source stops execution before intent/SQL, leaves a started run with no steps/applied rows, and creates neither candidate table. After restoring the original source and independently confirming both tables are absent, each test explicitly reconciles `operation_not_applied` and releases the diagnostic lock. Each test passed twice on MySQL 8.4.11, 8.4.13, and 9.7.4 and MariaDB 11.8.2, 11.8.9, and 13.0.2, all on disposable loopback servers. The project owner accepted the current CLI contract on 2026-11-08: `plan` is read-only, `up` recalculates, and reusable CLI approval is not part of the product contract. The engine-level source-revalidation tests are the applicable #12 criterion; no new CLI flow is authorized or required. Revisit only if a reusable approved-plan feature is proposed. |
+
+**Current-checkout complete opt-in suite on MariaDB LTS lines — 2026-11-09:**
+the 45-test ignored workspace selection passed serially on checkout
+`82f739911b09275335940b44fd07313f5b8480d3`, using fresh rootless, loopback-only
+containers without persistent volumes for PostgreSQL 18.6
+(`sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42`),
+MySQL 8.4.13
+(`sha256:a81d043930e51745522bd5c430961cf8286f0a23f0a9a2a6e0108f7ea71b0902`),
+and, in separate runs, MariaDB 10.11.14
+(`sha256:dbe56e20372fc6d6b8e0e396866ba89c4c7f128c38c4f59aaa54d957db95790c`),
+11.4.13
+(`sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620`),
+and 11.8.9
+(`sha256:c4124d1afa875e47f2892edf26b482fa54f796e2f342d3717a04ca091a22a9bd`).
+Each run passed 16 library/engine, 23 CLI, 3 DSL, and 3 legacy-import tests.
+`--pull=never` was used; the PgBouncer case and three server-TLS cases were
+excluded because their fixtures were not part of this run. The focused TLS and
+PgBouncer evidence is recorded separately above. Logs are under
+`/mnt/storage/projects/.scratch/dbm-g11-validation-20261109/` as
+`current-45-test-suite-serial.log`, `mariadb-10.11.14-current-45-tests.log`,
+and `mariadb-11.4.13-current-45-tests.log`; all test containers were removed.
+An initial default-parallel invocation on the same selected suite failed in the
+library test binary (6 passed, 10 failed), with session/named-lock timeouts, one
+MariaDB connection EOF, and a PostgreSQL shared-schema assertion. The cause was
+not isolated; that attempt is not counted as passing evidence or as a confirmed
+product defect. The serial reruns passed, but parallel execution remains
+unverified.
 
 **Additional MySQL/MariaDB CLI runs — 2026-11-07:** the eight opt-in tests for
 death before intent, after intent/before SQL, SQL-before-ACK, ACK-before-final
