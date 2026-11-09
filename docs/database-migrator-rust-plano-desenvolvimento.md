@@ -1745,6 +1745,17 @@ falhas; formatação, Clippy, build, exemplos e supply-chain também verdes). O 
 versão anterior do harness. G11 continua ativo e pendente pelas lacunas de
 matriz e pela revisão de segurança identificável/completa descritas acima.
 
+**Novo timeout do harness SQLite #11 — 2026-11-09:** o commit de contexto AI
+`0805472ce8125f303163c0ae432aab67f50cf77e` falhou no job de qualidade do CI
+`42553905101`: o harness observou `started` e o journal, mas a migration de teste
+com CTE de 5 milhões de linhas não chegou ao rollback dentro de 45 segundos. O
+job supply-chain passou; performance foi ignorado por dependência. A carga da
+fixture foi reduzida a 1 milhão de linhas; o teste focado passou seis vezes no
+checkout e o gate local completo passou (147 testes, 49 ignorados, zero falhas;
+formatação, Clippy, build, exemplos e supply-chain). A verificação remota dessa
+alteração ainda está pendente. O resultado não demonstra commit de dados da
+migration. G11 segue ativo e sem aprovação.
+
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 
 **G12** — Tag estável com release notes, checksums assinados quando possível, binários homologados, changelog, upgrade guide, compatibilidade semver, matriz de testes publicada e exemplos de CI de deploy seguros.

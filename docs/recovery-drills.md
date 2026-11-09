@@ -100,8 +100,21 @@ supply-chain checks). Corrected commit
 `8d475699c5e157ca11541b53802803b472c5d761` passed all three jobs in CI run
 [42548111248](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42548111248):
 quality, dependency audit/SBOM, and informational performance. Preserve the
-earlier failed run as historical evidence; the corrected harness is now
-verified remotely on this SHA.
+earlier failed run as historical evidence; the corrected harness was verified
+remotely on that SHA at that point.
+
+**SQLite #11 test workload follow-up — 2026-11-09:** CI run
+`42553905101` for `0805472ce8125f303163c0ae432aab67f50cf77e` failed the quality
+job again. This time `started=true` and the migration journal were observed, but
+the test did not observe rollback within 45 seconds; supply-chain passed and the
+dependent performance job did not run. The migration fixture's recursive CTE
+workload was reduced from 5,000,000 to 1,000,000 rows so the test reaches its
+intentional failure sooner while retaining an observable journal window. The
+focused test passed six consecutive local runs (each about one second), and the
+complete local gate passed afterward (147 passed, 49 ignored, zero failures;
+format, Clippy, build, examples, and supply-chain). Remote verification of this
+latest harness adjustment is pending; this run is a test-harness failure, not
+evidence that migration data committed.
 
 **Supplemental complete opt-in suite on PostgreSQL 17.11 — 2026-11-08:** the
 45-test ignored workspace selection passed against disposable PostgreSQL 17.11,

@@ -35,7 +35,7 @@ publishing a package, uploading release assets, or running database migrations.
   regression failed before and passed after the fix. The protection does not
   cover ancestor-directory replacement or migration-file races, and this focused
   fix is not a substitute for the missing complete, identifiable security review.
-- The current local checkout passed the all-features gate on 2026-11-08:
+- The current local checkout passed the all-features gate on 2026-11-09:
   formatting, `git diff --check`, Clippy, 147 workspace tests (49 opt-in tests
   ignored), build, both SQLite examples, and dependency/SBOM checks. The
   all-features workspace tests also passed on Rust 1.89.0 (147 passed, 49
@@ -46,8 +46,13 @@ publishing a package, uploading release assets, or running database migrations.
   separately verified where recorded in `docs/recovery-drills.md`. These are
   local results. Corrected harness commit `8d47569` passed remote CI run
   `42548111248`; that run predates the current AI-context correction and does not
-  verify it. Neither it nor these local suites resolves the inaccessible
-  external security review or remaining matrix gaps; G11 stays open.
+  verify it. The subsequent AI-context commit `0805472` failed quality in CI run
+  `42553905101` because the SQLite #11 harness did not observe rollback within
+  45 seconds; supply-chain passed and performance was skipped. The test workload
+  has since been reduced, passed six focused local runs, and passed the full local
+  gate, but a new remote run is still required. Neither the older green run nor
+  local suites resolves the inaccessible external security review or remaining
+  matrix gaps; G11 stays open.
 - Commit `15b722ea5c871fae73ee40078bbeee28101fa62c` passed quality,
   supply-chain/SBOM, and performance in CI run
   [42534997418](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42534997418).

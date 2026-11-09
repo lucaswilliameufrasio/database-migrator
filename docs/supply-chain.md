@@ -592,6 +592,17 @@ The older
 100M-iteration trigger-only evidence and CI result on `de529ce` remain valid for
 that earlier test version, not for the current read-lock harness correction.
 
+**SQLite #11 workload follow-up after AI-context commit — 2026-11-09:** CI run
+`42553905101` for `0805472ce8125f303163c0ae432aab67f50cf77e` failed the quality
+job because the test observed the started run and migration journal but did not
+observe rollback before its 45-second deadline; the supply-chain job passed and
+performance was skipped. The test's 5M-row recursive CTE was reduced to 1M rows.
+The focused test passed six local runs and the full current local gate passed
+(147 workspace tests passed, 49 ignored; formatting, Clippy, build, examples,
+and supply-chain checks). This does not override the failed CI run: remote
+verification of the workload adjustment is pending. The failure is in the
+observation harness and does not show that migration data committed.
+
 **Rollback-window test CI flake and hardening — 2026-11-08:** the initial
 quality attempt of run `42536081938` on `199cc07dd0a0594b4d8b7b110283d72c27a1262d`
 failed in `sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved`:

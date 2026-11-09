@@ -4337,7 +4337,7 @@ fn sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved() {
             .path()
             .join(format!("migrations/versioned/{migration_version}_rollback_crash.sql")),
         format!(
-            "-- dbm:dialect sqlite\n-- dbm:transaction auto\n-- dbm:up\nCREATE TABLE {effect_table} (id INTEGER PRIMARY KEY);\nWITH RECURSIVE sequence(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 5000000) SELECT sum(value) FROM sequence;\nSELECT * FROM deliberately_missing_rollback_crash_table;\n-- dbm:down\nDROP TABLE {effect_table};\n"
+            "-- dbm:dialect sqlite\n-- dbm:transaction auto\n-- dbm:up\nCREATE TABLE {effect_table} (id INTEGER PRIMARY KEY);\nWITH RECURSIVE sequence(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 1000000) SELECT sum(value) FROM sequence;\nSELECT * FROM deliberately_missing_rollback_crash_table;\n-- dbm:down\nDROP TABLE {effect_table};\n"
         ),
     )
     .expect("write transactional migration that fails after earlier DDL");
