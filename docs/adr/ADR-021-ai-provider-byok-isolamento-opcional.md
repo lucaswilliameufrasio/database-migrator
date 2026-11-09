@@ -33,6 +33,12 @@ de habilitação.
   somente dialect, migration sources locais selecionadas e pedido do usuário;
   não inclui linhas/dados de aplicação, connection URLs, segredos ou introspecção
   remota implícita.
+- A leitura de arquivos de contexto é relativa a um handle de diretório do
+  projeto. Depois de canonicalizar o caminho relativo, cada componente é aberto
+  sem seguir symlinks; metadata e conteúdo são lidos do mesmo handle de arquivo,
+  com limite de bytes aplicado também durante a leitura. Isso impede que uma
+  troca concorrente por symlink final ou intermediário altere o alvo entre a
+  validação do caminho e a leitura.
 - Sem retry automático de requests de geração, para não repetir custos ou
   chamadas após resultado ambíguo. Timeouts e rate limits são erros tipados e
   redigidos.
@@ -48,6 +54,10 @@ de habilitação.
   dificultar timeout/redaction e ampliar exposição por argumentos/processos.
 - **Aplicar arquivos ou SQL retornados pelo modelo:** rejeitado por violar a
   fronteira de aprovação humana e misturar proposta com mutação.
+- **Canonicalizar e depois usar operações ambient por pathname:** rejeitado para
+  arquivos de contexto porque uma troca concorrente do pathname pode invalidar
+  a verificação de raiz. O open por componentes relativos a um handle evita essa
+  separação entre o caminho validado e o objeto efetivamente lido.
 
 ## Consequências e evidência necessária
 
@@ -59,6 +69,12 @@ de habilitação.
 - Confirmar que preview não usa rede, que saídas não contêm o segredo e que
   nenhuma resposta pode acionar `up`, `down`, escrita em source ou alteração de
   metadata.
+- A regressão local em Unix cobre troca por symlink externo, por symlink interno
+  fora da migration source e por symlink em diretório intermediário. A prova
+  agressiva pós-fix foi fail-closed (160 erros/rejeições, nenhum preview
+  bem-sucedido e nenhum sentinel lido); os testes CLI normais de preview/provider
+  fake também passam. Isso não certifica todas as plataformas nem substitui a
+  revisão de segurança completa exigida por G11.
 - Rever o escopo de introspecção quando houver um contrato read-only de catálogo
   por driver; qualquer contexto de banco deverá continuar mínimo e opt-in.
 - Reconsiderar a dependência se um futuro provider nativo ou um transporte comum

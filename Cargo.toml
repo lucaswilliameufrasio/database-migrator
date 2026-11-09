@@ -24,12 +24,14 @@ bench = false
 
 [features]
 default = []
-ai = ["dep:reqwest"]
+ai = ["dep:cap-fs-ext", "dep:cap-std", "dep:reqwest"]
 test-runner-fixture = []
 fuzzing-harness = []
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
+cap-std = { version = "4.0.3", optional = true }
+cap-fs-ext = { version = "4.0.3", optional = true }
 mysql_async = { version = "0.37.1", default-features = false, features = ["default-rustls-ring"] }
 rusqlite = { version = "0.40.2", features = ["bundled", "hooks"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"], optional = true }

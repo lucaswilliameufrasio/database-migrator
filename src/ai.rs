@@ -5,10 +5,14 @@
 //! input that is validated before it is returned to the CLI.
 
 use std::future::Future;
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
 use std::time::Duration;
 
+use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
+use cap_std::ambient_authority;
+use cap_std::fs::{Dir, OpenOptions};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderValue};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -538,6 +542,98 @@ fn read_context_file(
     redact_content: bool,
     max_bytes: usize,
 ) -> Result<ContextFile> {
+    validate_context_relative_path(path)?;
+
+    let project_directory = Dir::open_ambient_dir(project_root, ambient_authority())
+        .map_err(|error| DbmError::io(project_root.display(), error))?;
+    let canonical_relative_path = project_directory
+        .canonicalize(path)
+        .map_err(|error| DbmError::io(path.display(), error))?;
+
+    read_context_file_from_canonical(
+        project_root,
+        &project_directory,
+        config,
+        &canonical_relative_path,
+        require_migration_source,
+        redact_content,
+        max_bytes,
+    )
+}
+
+fn read_context_file_from_canonical(
+    project_root: &Path,
+    project_directory: &Dir,
+    config: &LoadedConfig,
+    canonical_relative_path: &Path,
+    require_migration_source: bool,
+    redact_content: bool,
+    max_bytes: usize,
+) -> Result<ContextFile> {
+    validate_context_relative_path(canonical_relative_path)?;
+
+    let file = open_context_file_without_symlinks(project_directory, canonical_relative_path)
+        .map_err(|error| DbmError::io(canonical_relative_path.display(), error))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| DbmError::io(canonical_relative_path.display(), error))?;
+    if !metadata.is_file() || metadata.len() > max_bytes as u64 {
+        return Err(ai_error(
+            "AI_CONTEXT_TOO_LARGE",
+            "AI context must be a regular file within the configured byte limit",
+        ));
+    }
+    if require_migration_source {
+        let is_source_file = config.source_dirs.iter().any(|source| {
+            source
+                .path
+                .strip_prefix(project_root)
+                .ok()
+                .and_then(|source_path| project_directory.canonicalize(source_path).ok())
+                .is_some_and(|source_path| canonical_relative_path.starts_with(source_path))
+        });
+        if !is_source_file
+            || canonical_relative_path
+                .extension()
+                .and_then(|value| value.to_str())
+                != Some("sql")
+        {
+            return Err(ai_error(
+                "AI_CONTEXT_PATH_INVALID",
+                "migration context must be a .sql file inside a configured migration source",
+            ));
+        }
+    }
+    let read_limit = u64::try_from(max_bytes)
+        .unwrap_or(u64::MAX)
+        .saturating_add(1);
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(read_limit)
+        .read_to_end(&mut bytes)
+        .map_err(|error| DbmError::io(canonical_relative_path.display(), error))?;
+    if bytes.len() > max_bytes {
+        return Err(ai_error(
+            "AI_CONTEXT_TOO_LARGE",
+            "AI context must be a regular file within the configured byte limit",
+        ));
+    }
+    let content = std::str::from_utf8(&bytes).map_err(|_| {
+        ai_error(
+            "AI_CONTEXT_INVALID",
+            "AI context files must contain UTF-8 text",
+        )
+    })?;
+    Ok(ContextFile {
+        path: canonical_relative_path.to_string_lossy().replace('\\', "/"),
+        content: if redact_content {
+            redact_sensitive_text(content)
+        } else {
+            content.to_owned()
+        },
+    })
+}
+
+fn validate_context_relative_path(path: &Path) -> Result<()> {
     if path.is_absolute()
         || path.components().any(|component| {
             matches!(
@@ -554,60 +650,37 @@ fn read_context_file(
             "AI context paths must stay inside the project directory",
         ));
     }
+    Ok(())
+}
 
-    let requested_path = project_root.join(path);
-    let canonical_path = std::fs::canonicalize(&requested_path)
-        .map_err(|error| DbmError::io(requested_path.display(), error))?;
-    if !canonical_path.starts_with(project_root) {
-        return Err(ai_error(
-            "AI_CONTEXT_PATH_INVALID",
-            "AI context files resolving outside the project are not allowed",
-        ));
-    }
-    let metadata = std::fs::metadata(&canonical_path)
-        .map_err(|error| DbmError::io(canonical_path.display(), error))?;
-    if !metadata.is_file() || metadata.len() > max_bytes as u64 {
-        return Err(ai_error(
-            "AI_CONTEXT_TOO_LARGE",
-            "AI context must be a regular file within the configured byte limit",
-        ));
-    }
-    if require_migration_source {
-        let is_source_file = config.source_dirs.iter().any(|source| {
-            std::fs::canonicalize(&source.path)
-                .is_ok_and(|source_path| canonical_path.starts_with(source_path))
-        });
-        if !is_source_file
-            || canonical_path.extension().and_then(|value| value.to_str()) != Some("sql")
-        {
-            return Err(ai_error(
-                "AI_CONTEXT_PATH_INVALID",
-                "migration context must be a .sql file inside a configured migration source",
+fn open_context_file_without_symlinks(
+    project_directory: &Dir,
+    path: &Path,
+) -> std::io::Result<cap_std::fs::File> {
+    let mut components = path.components().peekable();
+    let mut parent = project_directory.try_clone()?;
+
+    while let Some(component) = components.next() {
+        let Component::Normal(name) = component else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "context path must contain only normal relative components",
             ));
+        };
+
+        if components.peek().is_some() {
+            parent = parent.open_dir_nofollow(name)?;
+        } else {
+            let mut options = OpenOptions::new();
+            options.read(true).follow(FollowSymlinks::No);
+            return parent.open_with(name, &options);
         }
     }
-    let bytes = std::fs::read(&canonical_path)
-        .map_err(|error| DbmError::io(canonical_path.display(), error))?;
-    let content = std::str::from_utf8(&bytes).map_err(|_| {
-        ai_error(
-            "AI_CONTEXT_INVALID",
-            "AI context files must contain UTF-8 text",
-        )
-    })?;
-    let relative_path = canonical_path.strip_prefix(project_root).map_err(|_| {
-        ai_error(
-            "AI_CONTEXT_PATH_INVALID",
-            "context path is outside the project",
-        )
-    })?;
-    Ok(ContextFile {
-        path: relative_path.to_string_lossy().replace('\\', "/"),
-        content: if redact_content {
-            redact_sensitive_text(content)
-        } else {
-            content.to_owned()
-        },
-    })
+
+    Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        "context path must name a file",
+    ))
 }
 
 fn redact_sensitive_text(text: &str) -> String {
@@ -1227,15 +1300,18 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
+    use cap_std::ambient_authority;
+    use cap_std::fs::Dir;
     use serde_json::{Value, json};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
     use tokio::task::JoinHandle;
 
     use super::{
-        AiAction, AiExecutionOptions, AiProvider, MigrationProposal, OpenAiCompatibleProvider,
-        ProposalFile, ProposalFileType, ReviewReport, build_messages, parse_and_validate_response,
-        redact_json, redact_sensitive_text, safe_sql_basename,
+        AiAction, AiExecutionOptions, AiProvider, MAX_CONTEXT_FILE_BYTES, MigrationProposal,
+        OpenAiCompatibleProvider, ProposalFile, ProposalFileType, ReviewReport, build_messages,
+        parse_and_validate_response, read_context_file_from_canonical, redact_json,
+        redact_sensitive_text, safe_sql_basename,
     };
     use crate::config::{
         AiConfig, AiProfileConfig, Environment, ExecutionConfig, LoadedConfig, SourceDir,
@@ -1491,6 +1567,125 @@ mod tests {
                 128 * 1024,
             )
             .is_err()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn context_open_rejects_symlinks_swapped_after_canonicalization() {
+        let project = tempfile::tempdir().expect("temporary project");
+        let outside = tempfile::tempdir().expect("outside directory");
+        let config_path = project.path().join("dbm.toml");
+        fs::write(&config_path, "test config").expect("write config file");
+        let config = test_config(project.path());
+        let relative_path = PathBuf::from("migrations/versioned/context.sql");
+        let context_path = project.path().join(&relative_path);
+        let outside_path = outside.path().join("outside.sql");
+        fs::write(&context_path, "-- dbm:up\nSELECT 'inside';\n").expect("write context file");
+        fs::write(
+            &outside_path,
+            "-- dbm:up\nSELECT 'SYNTHETIC_OUTSIDE_CONTEXT_SENTINEL';\n",
+        )
+        .expect("write external context file");
+
+        let project_directory = Dir::open_ambient_dir(project.path(), ambient_authority())
+            .expect("open project directory capability");
+        let canonical_relative_path = project_directory
+            .canonicalize(&relative_path)
+            .expect("canonicalize in-project context path");
+
+        fs::remove_file(&context_path).expect("remove original context file");
+        std::os::unix::fs::symlink(&outside_path, &context_path)
+            .expect("replace context file with external symlink");
+
+        let result = read_context_file_from_canonical(
+            project.path(),
+            &project_directory,
+            &config,
+            &canonical_relative_path,
+            true,
+            true,
+            MAX_CONTEXT_FILE_BYTES,
+        );
+        assert!(
+            result.is_err(),
+            "opening a path replaced by an external symlink must fail"
+        );
+
+        fs::remove_file(&context_path).expect("remove external symlink");
+        let internal_path = project.path().join("private/context.sql");
+        fs::create_dir_all(internal_path.parent().expect("private directory"))
+            .expect("create private directory");
+        fs::write(
+            &internal_path,
+            "SELECT 'SYNTHETIC_INTERNAL_CONTEXT_SENTINEL';\n",
+        )
+        .expect("write internal file outside migration source");
+        std::os::unix::fs::symlink(&internal_path, &context_path)
+            .expect("replace context file with internal symlink");
+
+        let result = read_context_file_from_canonical(
+            project.path(),
+            &project_directory,
+            &config,
+            &canonical_relative_path,
+            true,
+            true,
+            MAX_CONTEXT_FILE_BYTES,
+        );
+        assert!(
+            result.is_err(),
+            "opening a path replaced by an internal out-of-source symlink must fail"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn context_open_rejects_intermediate_symlink_swapped_after_canonicalization() {
+        let project = tempfile::tempdir().expect("temporary project");
+        let outside = tempfile::tempdir().expect("outside directory");
+        let config_path = project.path().join("dbm.toml");
+        fs::write(&config_path, "test config").expect("write config file");
+        let config = test_config(project.path());
+        let relative_path = PathBuf::from("migrations/versioned/nested/context.sql");
+        let nested_directory = project.path().join("migrations/versioned/nested");
+        fs::create_dir_all(&nested_directory).expect("create nested migration directory");
+        fs::write(
+            nested_directory.join("context.sql"),
+            "-- dbm:up\nSELECT 'inside';\n",
+        )
+        .expect("write context file");
+
+        let project_directory = Dir::open_ambient_dir(project.path(), ambient_authority())
+            .expect("open project directory capability");
+        let canonical_relative_path = project_directory
+            .canonicalize(&relative_path)
+            .expect("canonicalize in-project context path");
+
+        let moved_directory = project.path().join("moved-nested");
+        fs::rename(&nested_directory, &moved_directory).expect("move original nested directory");
+        fs::create_dir_all(outside.path().join("replacement"))
+            .expect("create outside replacement directory");
+        fs::write(
+            outside.path().join("replacement/context.sql"),
+            "-- dbm:up\nSELECT 'SYNTHETIC_OUTSIDE_CONTEXT_SENTINEL';\n",
+        )
+        .expect("write external context file");
+        std::os::unix::fs::symlink(outside.path().join("replacement"), &nested_directory)
+            .expect("replace nested migration directory with external symlink");
+
+        let result = read_context_file_from_canonical(
+            project.path(),
+            &project_directory,
+            &config,
+            &canonical_relative_path,
+            true,
+            true,
+            MAX_CONTEXT_FILE_BYTES,
+        );
+        assert!(
+            result.is_err(),
+            "opening a path through an intermediate external symlink must fail"
         );
     }
 

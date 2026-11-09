@@ -1700,18 +1700,35 @@ não-TLS, 2 testes de adapter, revalidação #12, DSL Up/Down e importação SQL
 TLS CA/hostname passou uma vez em cada linha. A suíte opt-in completa passou uma
 vez em cada uma das duas linhas, em combinações descartáveis com PostgreSQL
 18.6/MySQL 8.4.13 (45 testes; PgBouncer e três casos TLS foram excluídos; o TLS
-MariaDB foi exercitado separadamente). Os guards de teste foram alinhados às
-quatro linhas MariaDB já declaradas. `docs/recovery-drills.md` e
-`docs/support-matrix.md` detalham os limites restantes.
+MariaDB foi exercitado separadamente). Também passou a suíte opt-in completa de
+45 testes no trio PostgreSQL 17.11/MySQL 8.4.13/MariaDB 11.8.9, como evidência
+suplementar; PostgreSQL 18.6 continua sendo a linha requerida para #11. Os
+guards de teste foram alinhados às quatro linhas MariaDB já declaradas.
+`docs/recovery-drills.md` e `docs/support-matrix.md` detalham os limites restantes.
 
 O gate local completo do checkout atual passou: formatação, `git diff --check`,
-Clippy com `-D warnings`, workspace all-features/locked (145 passed, 49 ignored,
+Clippy com `-D warnings`, workspace all-features/locked (147 passed, 49 ignored,
 zero falhas), build, dois exemplos e `scripts/supply-chain.sh` com BOM CycloneDX
 validado e auditorias sem falhas (avisos não bloqueantes de versões duplicadas
 e allowances de licença sem uso). Isso ainda não fecha a matriz total nem a
 revisão de segurança: o relatório externo e os quatro registros
 `needs_validation` continuam indisponíveis e não corroborados. Não se infere
 ausência de issues críticas; G11 permanece parcial e sem aprovação.
+
+**Correção de TOCTOU no contexto AI — 2026-11-08:** a reprodução pré-fix obteve
+o sentinel externo em 21 de 60 previews bem-sucedidos durante substituição
+concorrente do caminho. A leitura agora usa um handle de diretório do projeto,
+canonicalização relativa e abertura componente a componente sem seguir
+symlinks; metadata e bytes vêm do mesmo handle aberto, com limite aplicado
+durante a leitura. Regressões determinísticas Unix rejeitam symlinks finais para
+alvos externos e internos fora da source, além de symlink em diretório
+intermediário. Na reprodução pós-fix, 160 tentativas falharam fechadas, sem
+preview bem-sucedido nem leitura do sentinel; os quatro testes CLI normais de
+AI/preview fake passaram separadamente. Sem provider, credenciais ou rede reais.
+O teste all-features/locked passou em Rust 1.89.0 (147 testes, 49 ignorados); o
+gate local completo passou em Rust 1.99.1. Isso confirma a correção focada, não
+uma revisão completa nem as plataformas não testadas. G11 continua ativo pelas
+lacunas da matriz e pela revisão identificável/completa pendente.
 
 **Reabertura do gate CI e sincronização do teste SQLite #11 — 2026-11-08:** o
 commit `53b12921b0af8691a5ab17fa65ccf8d5d741b2a4` foi enviado a `main`, mas a CI
@@ -1721,11 +1738,12 @@ job de performance não executou; esse SHA não tem CI verde. O teste local agor
 mantém uma transação de leitura em `schema_migration_runs` depois de observar o
 rollback, bloqueando o commit da atualização `failed` até a CLI ser encerrada.
 O teste focado passou seis vezes localmente e o gate local completo
-pós-alteração passou (145 testes, 49 opt-in ignorados, zero falhas; formatação,
-Clippy, build, exemplos e supply-chain também verdes). A CI do SHA corrigido
-ainda não foi verificada; o resultado anterior do commit `de529ce` não valida
-esta revisão. G11 continua ativo e pendente, além das lacunas de matriz e da
-revisão de segurança identificável/completa descritas acima.
+pós-alteração naquele estágio passou (145 testes, 49 opt-in ignorados, zero
+falhas; formatação, Clippy, build, exemplos e supply-chain também verdes). O commit corrigido
+`8d475699c5e157ca11541b53802803b472c5d761` passou os três jobs da CI no run
+`42548111248`. O resultado anterior do commit `de529ce` continua referente à
+versão anterior do harness. G11 continua ativo e pendente pelas lacunas de
+matriz e pela revisão de segurança identificável/completa descritas acima.
 
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 

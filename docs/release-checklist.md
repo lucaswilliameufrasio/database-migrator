@@ -18,9 +18,17 @@ publishing a package, uploading release assets, or running database migrations.
   regressions passed locally. A bounded read-through also inspected path,
   runner, AI/provider, CLI error, and database-connection boundaries; it
   reaffirmed that compiled runners are trusted process-level code, not a
-  sandbox. No additional defect was confirmed in that limited pass, which does
-  not satisfy the complete security-review requirement above; the G11 checkbox
-  remains open.
+  sandbox. Follow-up testing confirmed an AI-context TOCTOU: before the fix, a
+  synthetic external sentinel appeared in 21 of 60 successful previews during
+  concurrent path replacement. Context files now open component-by-component
+  without following symlinks and are read from the opened handle. Deterministic
+  Unix regressions cover final external/internal symlinks and an intermediate
+  symlink. The post-fix stress reproduction had no sentinel reads, but all 160
+  previews failed closed; normal preview/fake-provider CLI tests passed
+  separately. No real provider, credentials, or network were used, and no formal
+  severity is assigned. This focused correction is not the complete identifiable
+  security review required by G11; the unavailable external report and four
+  uncorroborated historical references remain unresolved.
 - A follow-up path-race regression on 2026-11-08 reproduced that SQLite could
   follow a final-component database symlink swapped after configuration
   validation. Read-only and mutable opens now use `SQLITE_OPEN_NOFOLLOW`; the
@@ -28,13 +36,18 @@ publishing a package, uploading release assets, or running database migrations.
   cover ancestor-directory replacement or migration-file races, and this focused
   fix is not a substitute for the missing complete, identifiable security review.
 - The current local checkout passed the all-features gate on 2026-11-08:
-  formatting, `git diff --check`, Clippy, 145 workspace tests (49 opt-in tests
-  ignored), build, both SQLite examples, and dependency/SBOM checks. Disposable
-  server runs passed on PostgreSQL 17.11 and MariaDB 10.11.14/11.4.13; each older
-  MariaDB line also passed the 45-test opt-in suite paired with PostgreSQL 18.6
-  and MySQL 8.4.13, plus its TLS CA/hostname test. These are local results, not
-  remote CI for the corrected harness, and do not resolve the inaccessible
-  external security review; G11 stays open.
+  formatting, `git diff --check`, Clippy, 147 workspace tests (49 opt-in tests
+  ignored), build, both SQLite examples, and dependency/SBOM checks. The
+  all-features workspace tests also passed on Rust 1.89.0 (147 passed, 49
+  ignored); the complete gate ran on Rust 1.99.1. Disposable
+  server runs passed on PostgreSQL 17.11 and MariaDB 10.11.14/11.4.13; the 45-test
+  opt-in suite passed on PostgreSQL 17.11/MySQL 8.4.13/MariaDB 11.8.9 and on each
+  older MariaDB line paired with PostgreSQL 18.6/MySQL 8.4.13. TLS cases were
+  separately verified where recorded in `docs/recovery-drills.md`. These are
+  local results. Corrected harness commit `8d47569` passed remote CI run
+  `42548111248`; that run predates the current AI-context correction and does not
+  verify it. Neither it nor these local suites resolves the inaccessible
+  external security review or remaining matrix gaps; G11 stays open.
 - Commit `15b722ea5c871fae73ee40078bbeee28101fa62c` passed quality,
   supply-chain/SBOM, and performance in CI run
   [42534997418](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42534997418).
@@ -51,10 +64,12 @@ publishing a package, uploading release assets, or running database migrations.
   quality failed in the SQLite #11 observation-window test, supply-chain passed,
   and performance did not run because its dependencies failed. A local harness
   correction now holds a SQLite read transaction after rollback; its focused test
-  passed six times and the complete local gate passed on the corrected working
-  tree (145 passed, 49 ignored, zero failures). CI on the correction remains
-  pending. Do not treat the earlier green CI for `de529ce` as verification of this
-  newer harness version.
+  passed six times and the local gate at that stage passed (145 passed, 49
+  ignored, zero failures). Corrected commit `8d47569`
+  subsequently passed all three CI jobs in run
+  [42548111248](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42548111248).
+  The earlier green CI for `de529ce` remains evidence for its older harness, not
+  this read-lock correction.
 - [x] Draft changelog, upgrade guide, support matrix, and release checklist
       prepared.
 - [x] CI configuration for dependency audit and ephemeral CycloneDX SBOM

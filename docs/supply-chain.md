@@ -508,11 +508,35 @@ heuristic is not a guarantee that arbitrary source text contains no secrets,
 and selected migration content is sent to that configured provider. The database
 adapters reject invalid connection settings without echoing connection values
 and enforce TLS validation by default for remote targets, with narrowly scoped
-local plaintext opt-ins. No additional confirmed defect was established in this
-bounded read-through; these observations do not establish absence of other
-issues, provide independent severity triage, or replace a complete review.
+local plaintext opt-ins. A follow-up reproduction confirmed an AI-context path
+TOCTOU: before the fix, 21 of 60 successful previews contained a synthetic
+sentinel from an out-of-project symlink target during concurrent replacement.
+The code now canonicalizes paths relative to a project-directory capability,
+opens each component without following symlinks, and reads bounded content and
+metadata from the opened file handle. Deterministic Unix regressions cover final
+symlinks to external and internal out-of-source files, plus an intermediate
+directory symlink. In a post-fix stress reproduction, 160 attempts produced no
+sentinel reads, but all 160 previews failed closed; this is not evidence of
+successful previews under contention. The normal fake-provider/preview CLI tests
+passed separately. The reproduction used synthetic files only, with no real
+provider, credentials, or network calls. No formal severity is assigned. This
+confirmed issue is separate from the four unavailable historical
+`needs_validation` references; neither it nor this bounded pass replaces the
+complete, identifiable review required by G11 or establishes absence of other
+issues.
 
-After the correction, the local gate passed `cargo fmt --all -- --check`,
+The new `cap-std`/`cap-fs-ext` 4.0.3 dependencies are optional and enabled only
+with the existing `ai` feature. The full all-features workspace test suite passed
+on Rust 1.89.0 (147 passed, 49 ignored), and the complete local gate passed on
+Rust 1.99.1 (147 passed, 49 ignored; format, Clippy, build, examples, and
+supply-chain checks included). The path-race regression is Unix-gated and was
+run on local Linux; macOS and Windows behavior remains unverified. The
+capability setup begins by opening the already-canonicalized project root, so
+this evidence is specifically about races in selected context-path components,
+not replacement of the project root itself.
+
+At that earlier correction stage, the local gate passed
+`cargo fmt --all -- --check`,
 Clippy with `-D warnings`, `cargo test --workspace --all-features --locked`
 (144 passed, 49 ignored, zero failures), the all-features workspace build, both
 documented SQLite examples, and `sh scripts/supply-chain.sh`. The supply-chain
@@ -559,10 +583,12 @@ record and does not establish a product-data failure. The local harness now
 holds a SQLite read transaction on `schema_migration_runs` after observing
 rollback, preventing the failed-run commit from closing the observation window
 before the CLI is killed. The focused test passed six consecutive local runs.
-The full post-change local gate has since passed (145 workspace tests passed,
-49 opt-in tests ignored, zero failures, plus formatting, Clippy, build, examples,
-and supply-chain checks). A remote run on a corrected SHA has not yet passed; no
-successful CI result is inferred for this correction. The older
+The full post-change local gate passed (145 workspace tests passed, 49 opt-in
+tests ignored, zero failures, plus formatting, Clippy, build, examples, and
+supply-chain checks). Corrected commit
+`8d475699c5e157ca11541b53802803b472c5d761` passed all three jobs in CI run
+[42548111248](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42548111248).
+The older
 100M-iteration trigger-only evidence and CI result on `de529ce` remain valid for
 that earlier test version, not for the current read-lock harness correction.
 
@@ -594,7 +620,10 @@ tests passed, including the recovery-boundary bundle (#11) and engine source
 revalidation (#12). The first broad filter also selected the TLS test without
 its configured-CA fixture and failed its `sslmode` precondition; the successful
 rerun excluded that TLS-only case. PostgreSQL 18.6 remains the owner-selected
-required line for #11; 17.11 evidence is supplemental.
+required line for #11; 17.11 evidence is supplemental. The complete 45-test
+ignored workspace selection also passed on disposable PostgreSQL 17.11, MySQL
+8.4.13, and MariaDB 11.8.9; PgBouncer and the three server-TLS tests were
+excluded, with the PostgreSQL TLS fixture separately covered on 16.15.
 
 On official MariaDB 10.11.14 and 11.4.13 images, each of two fresh disposable
 loopback runs passed 9 non-TLS CLI recovery/metadata tests, 2 adapter
