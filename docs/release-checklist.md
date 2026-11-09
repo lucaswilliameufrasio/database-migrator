@@ -56,9 +56,15 @@ publishing a package, uploading release assets, or running database migrations.
   45 seconds; supply-chain passed and performance was skipped. The test workload
   was reduced and passed six focused local runs plus the full local gate. Follow-up
   commit `894d984` passed all three CI jobs in run `42555474213` (quality,
-  dependency audit/SBOM, and informational performance). This verifies the AI
-  context correction and current #11 harness on that SHA; it does not resolve the
-  inaccessible external security review or remaining matrix gaps, so G11 stays
+  dependency audit/SBOM, and informational performance). However, the later
+  documentation commit `655f7ec` failed the SQLite #11 test in CI run
+  `42560317968`: rollback was observed, but the CLI exited before the harness
+  captured failed-run persistence. The audit/SBOM job passed; performance did not
+  run. The current working correction writes a sentinel before the trigger's
+  slow CTE; it passed six focused local runs, the full local gate, and the
+  all-features workspace tests on Rust 1.89.0. Remote CI for this correction is
+  pending. Neither the earlier green SHA nor local evidence closes this issue,
+  the inaccessible external security review, or remaining matrix gaps; G11 stays
   open.
 - Commit `15b722ea5c871fae73ee40078bbeee28101fa62c` passed quality,
   supply-chain/SBOM, and performance in CI run

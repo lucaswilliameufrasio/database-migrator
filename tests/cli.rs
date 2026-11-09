@@ -4321,6 +4321,7 @@ fn sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved() {
              CREATE TRIGGER hold_failed_run_persistence \
              AFTER UPDATE OF state ON schema_migration_runs \
              WHEN NEW.state = 'failed' BEGIN \
+                 INSERT INTO failed_run_trigger_sink VALUES (0);\
                  INSERT INTO failed_run_trigger_sink \
                  SELECT sum(value) FROM (\
                      WITH RECURSIVE sequence(value) AS (\
@@ -4366,7 +4367,7 @@ fn sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved() {
                 .wait_with_output()
                 .expect("collect SQLite migration output after early exit");
             panic!(
-                "SQLite migration exited before rollback-window trigger: {status}; started={durable_started_run}, migration journal={migration_journal_seen}, rollback={rollback_seen}; stdout={}, stderr={}",
+                "SQLite migration exited before rollback persistence window: {status}; started={durable_started_run}, migration journal={migration_journal_seen}, rollback={rollback_seen}; stdout={}, stderr={}",
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
             );

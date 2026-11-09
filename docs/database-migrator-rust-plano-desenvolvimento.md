@@ -1771,6 +1771,19 @@ estão descritos em `docs/recovery-drills.md`. Permanecem pendentes a revisão d
 segurança identificável/completa, a execução paralela confiável e as lacunas de
 plataformas/versões ainda não homologadas; G11 não está aprovado.
 
+**Falha CI subsequente no harness SQLite #11 — 2026-11-09:** o commit
+documental `655f7ec1cc0c1bb6036fd5ce5d9bf19478115ae8` falhou no job quality do
+CI `42560317968`. O teste observou run iniciado, journal e rollback, mas a CLI
+saiu com código 6 antes da observação da persistência do estado `failed`; isso
+não demonstra commit dos dados da migration. A causa provável do harness era a
+CTE lenta do trigger avaliar antes de efetivar a primeira escrita. A correção
+local grava uma sentinela antes da CTE: seis execuções focadas passaram, assim
+como o gate local completo (147 testes, 49 opt-in ignorados) e
+`cargo +1.89.0 test --workspace --all-features --locked`. O audit/SBOM passou na
+CI que falhou; performance não executou. O novo harness ainda aguarda CI remoto;
+G11 permanece aberto até essa verificação e as pendências de segurança e matriz
+serem resolvidas ou formalmente delimitadas.
+
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 
 **G12** — Tag estável com release notes, checksums assinados quando possível, binários homologados, changelog, upgrade guide, compatibilidade semver, matriz de testes publicada e exemplos de CI de deploy seguros.

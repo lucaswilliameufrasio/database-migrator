@@ -147,6 +147,23 @@ quality/tests/build/examples, dependency audit/SBOM, and informational
 performance. The failure on `0805472` remains historical evidence of a test
 timeout, not evidence that migration data committed.
 
+**SQLite #11 persistence-window follow-up — 2026-11-09:** documentation commit
+`655f7ec1cc0c1bb6036fd5ce5d9bf19478115ae8` failed the quality job in CI run
+`42560317968`. The test observed the started run, migration journal, and
+rollback, but the CLI exited with code 6 before the harness observed the later
+failed-run persistence window. The CLI reported `EXECUTION_FAILED`; this is not
+evidence that migration data committed. The trigger's expensive `INSERT ...
+SELECT` could evaluate its recursive CTE before performing a write, so its
+journal window was not guaranteed to be visible during the delay. The working
+correction inserts a sentinel row first and runs the expensive CTE afterward,
+making the trigger establish its write/journal window before the delay. The
+focused test passed six consecutive runs, the complete local gate passed (147
+tests, 49 opt-in tests ignored; format, Clippy, build, examples, and
+supply-chain), and `cargo +1.89.0 test --workspace --all-features --locked`
+passed on the corrected working tree. This correction has not yet been verified
+by remote CI; the new commit's CI result is required before treating #11 as
+stable.
+
 **Supplemental complete opt-in suite on PostgreSQL 17.11 — 2026-11-08:** the
 45-test ignored workspace selection passed against disposable PostgreSQL 17.11,
 MySQL 8.4.13, and MariaDB 11.8.9 instances. Counts were 16 library, 23 CLI, 3
