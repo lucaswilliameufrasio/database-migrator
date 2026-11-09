@@ -599,9 +599,12 @@ observe rollback before its 45-second deadline; the supply-chain job passed and
 performance was skipped. The test's 5M-row recursive CTE was reduced to 1M rows.
 The focused test passed six local runs and the full current local gate passed
 (147 workspace tests passed, 49 ignored; formatting, Clippy, build, examples,
-and supply-chain checks). This does not override the failed CI run: remote
-verification of the workload adjustment is pending. The failure is in the
-observation harness and does not show that migration data committed.
+and supply-chain checks). Follow-up commit
+`894d9849ca383e805e779125a33737c3484bb84b` passed all three jobs in CI run
+[42555474213](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42555474213):
+quality, dependency audit/SBOM, and informational performance. The failure on
+`0805472` remains part of the record as a test-observation timeout and does not
+show that migration data committed.
 
 **Rollback-window test CI flake and hardening — 2026-11-08:** the initial
 quality attempt of run `42536081938` on `199cc07dd0a0594b4d8b7b110283d72c27a1262d`

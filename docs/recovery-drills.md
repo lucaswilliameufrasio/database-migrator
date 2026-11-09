@@ -112,9 +112,12 @@ workload was reduced from 5,000,000 to 1,000,000 rows so the test reaches its
 intentional failure sooner while retaining an observable journal window. The
 focused test passed six consecutive local runs (each about one second), and the
 complete local gate passed afterward (147 passed, 49 ignored, zero failures;
-format, Clippy, build, examples, and supply-chain). Remote verification of this
-latest harness adjustment is pending; this run is a test-harness failure, not
-evidence that migration data committed.
+format, Clippy, build, examples, and supply-chain). Follow-up commit
+`894d9849ca383e805e779125a33737c3484bb84b` passed all three jobs in CI run
+[42555474213](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42555474213):
+quality/tests/build/examples, dependency audit/SBOM, and informational
+performance. The failure on `0805472` remains historical evidence of a test
+timeout, not evidence that migration data committed.
 
 **Supplemental complete opt-in suite on PostgreSQL 17.11 — 2026-11-08:** the
 45-test ignored workspace selection passed against disposable PostgreSQL 17.11,

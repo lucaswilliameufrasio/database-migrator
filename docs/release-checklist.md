@@ -49,10 +49,12 @@ publishing a package, uploading release assets, or running database migrations.
   verify it. The subsequent AI-context commit `0805472` failed quality in CI run
   `42553905101` because the SQLite #11 harness did not observe rollback within
   45 seconds; supply-chain passed and performance was skipped. The test workload
-  has since been reduced, passed six focused local runs, and passed the full local
-  gate, but a new remote run is still required. Neither the older green run nor
-  local suites resolves the inaccessible external security review or remaining
-  matrix gaps; G11 stays open.
+  was reduced and passed six focused local runs plus the full local gate. Follow-up
+  commit `894d984` passed all three CI jobs in run `42555474213` (quality,
+  dependency audit/SBOM, and informational performance). This verifies the AI
+  context correction and current #11 harness on that SHA; it does not resolve the
+  inaccessible external security review or remaining matrix gaps, so G11 stays
+  open.
 - Commit `15b722ea5c871fae73ee40078bbeee28101fa62c` passed quality,
   supply-chain/SBOM, and performance in CI run
   [42534997418](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42534997418).

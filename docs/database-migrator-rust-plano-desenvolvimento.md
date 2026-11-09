@@ -1752,9 +1752,11 @@ com CTE de 5 milhões de linhas não chegou ao rollback dentro de 45 segundos. O
 job supply-chain passou; performance foi ignorado por dependência. A carga da
 fixture foi reduzida a 1 milhão de linhas; o teste focado passou seis vezes no
 checkout e o gate local completo passou (147 testes, 49 ignorados, zero falhas;
-formatação, Clippy, build, exemplos e supply-chain). A verificação remota dessa
-alteração ainda está pendente. O resultado não demonstra commit de dados da
-migration. G11 segue ativo e sem aprovação.
+formatação, Clippy, build, exemplos e supply-chain). O commit seguinte
+`894d9849ca383e805e779125a33737c3484bb84b` passou os três jobs no CI
+`42555474213` (quality, audit/SBOM e performance). A falha de `0805472` permanece
+registrada como timeout de observação do harness, não como evidência de commit
+dos dados da migration. G11 segue ativo e sem aprovação.
 
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 
