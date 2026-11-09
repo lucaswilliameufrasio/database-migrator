@@ -547,3 +547,17 @@ runner campaign, but remains informational, not a regression threshold, and
 does not establish variance across runners. G11 remains partial: the complete
 security review/external records and remaining applicable adapter/version/
 failure-boundary evidence are still open.
+
+**Rollback-window test CI flake and local hardening — 2026-11-08:** the initial
+quality attempt of run `42536081938` on `199cc07dd0a0594b4d8b7b110283d72c27a1262d`
+failed in `sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved`:
+the child exited with code 6 before the test captured the intended observation
+window, although it had observed the started run, migration journal, and rollback.
+The failed quality job was rerun on the same SHA and passed; supply-chain had
+passed in the initial attempt, and performance passed after the rerun, so the
+final run was green. To reduce dependence on timing, the test-only recursive
+trigger was increased from 20M to 100M iterations. The focused test then passed
+three consecutive local runs, and the full local gate passed with 144 passed,
+49 ignored, and no failures. This is test-harness-only; remote CI for the updated
+trigger is pending. The initial failure remains part of the evidence and is not
+rewritten as a code regression or erased by the rerun.

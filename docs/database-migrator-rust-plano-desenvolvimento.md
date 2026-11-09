@@ -1672,6 +1672,19 @@ nesse runner, sem estabelecer variação entre runners ou um gate de regressão.
 G11 continua parcial pela revisão de segurança identificável/completa e pelas
 lacunas restantes da matriz.
 
+**Robustez do teste SQLite #11 — 2026-11-08:** a primeira tentativa de quality
+no CI `42536081938` para `199cc07dd0a0594b4d8b7b110283d72c27a1262d` falhou porque
+o teste não capturou a janela de observação antes de a CLI sair com código 6,
+apesar de já ter observado run iniciado, journal e rollback. O rerun do job
+falho no mesmo SHA passou; supply-chain passou na tentativa inicial e, após o
+rerun, performance também passou. O resultado final daquele run foi verde, mas a
+falha inicial permanece registrada. A trigger exclusiva do teste passou de 20M
+para 100M iterações para ampliar a janela; três execuções focadas e o gate local
+completo (144 passed, 49 ignored, zero falhas) passaram após essa alteração. A
+validação remota da nova trigger ainda está pendente; nenhuma lógica de produção
+foi alterada. G11 continua parcial pelas lacunas de auditoria de segurança e da
+matriz registradas em `docs/recovery-drills.md`.
+
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 
 **G12** — Tag estável com release notes, checksums assinados quando possível, binários homologados, changelog, upgrade guide, compatibilidade semver, matriz de testes publicada e exemplos de CI de deploy seguros.

@@ -4316,7 +4316,7 @@ fn sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved() {
                  SELECT sum(value) FROM (\
                      WITH RECURSIVE sequence(value) AS (\
                          SELECT 1 UNION ALL SELECT value + 1 FROM sequence \
-                         WHERE value < 20000000\
+                         WHERE value < 100000000\
                      ) SELECT value FROM sequence\
                  );\
              END;",
