@@ -561,3 +561,38 @@ three consecutive local runs, and the full local gate passed with 144 passed,
 49 ignored, and no failures. Push commit
 `de529ce0a9e0b025a99ffc766cb8cea9796a740f` then passed all three jobs in [workflow
 run 42538270662](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42538270662): quality (format, Clippy, default tests, build, and examples), dependency audit/CycloneDX generation and upload, and informational performance baseline. The updated trigger therefore passed remote CI on that exact SHA. The initial failure remains part of the evidence and is not rewritten as a code regression or erased by the rerun.
+
+**Additional G11 verification — 2026-11-08:** a SQLite target-symlink race was
+reproduced after configuration validation. `SQLITE_OPEN_NOFOLLOW` now protects
+the final database-path component for both read-only and mutable opens; the
+regression failed before the change and passed after it. Ancestor-directory and
+migration-file replacement races remain outside this assertion. The decision
+and boundary are recorded in [`ADR-003`](adr/ADR-003-sqlite-locking-and-transactions.md).
+
+A supplemental PostgreSQL 17.11 run used official image digest
+`sha256:ff87138949ad9a46f32ff23bd6852b52ce024a13dffe9b4087be98292cdd3b4f` on a
+disposable loopback-only container. Twelve library/engine tests and five CLI
+tests passed, including the recovery-boundary bundle (#11) and engine source
+revalidation (#12). The first broad filter also selected the TLS test without
+its configured-CA fixture and failed its `sslmode` precondition; the successful
+rerun excluded that TLS-only case. PostgreSQL 18.6 remains the owner-selected
+required line for #11; 17.11 evidence is supplemental.
+
+On official MariaDB 10.11.14 and 11.4.13 images, each disposable loopback run
+passed 9 non-TLS CLI recovery/metadata tests, 2 adapter metadata/import tests,
+and engine source-revalidation #12. This exposed stale test-only vendor guards
+that accepted only MariaDB 11.8/13.0 despite the already-declared 10.11/11.4
+support lines. The guards now recognize all four declared MariaDB lines. The
+full ignored suite and TLS fixtures were not run on 10.11.14/11.4.13; MySQL-family
+#11 remains inapplicable under `transaction=never`.
+
+The final local gate on this working tree passed formatting, `git diff --check`,
+Clippy (`-D warnings`), the all-features locked workspace tests (145 passed, 49
+ignored, zero failures), the all-features build, both documented SQLite examples,
+and `sh scripts/supply-chain.sh`. The script audited both dependency graphs,
+validated the generated CycloneDX BOM, and passed advisories, bans, licenses,
+and sources; duplicate-version and unused-license-allowance warnings were
+non-failing. This does not complete the 12-scenario adapter/version matrix or
+resolve the inaccessible external security report and four uncorroborated
+`needs_validation` references. G11 remains partial; no absence-of-critical-issues
+claim is made.

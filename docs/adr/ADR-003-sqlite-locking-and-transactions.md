@@ -20,6 +20,10 @@ conexões diferentes.
   migrations são recusados.
 - `plan` e `status` abrem alvos existentes em modo read-only. Alvo inexistente
   é tratado como vazio sem criar arquivo.
+- As aberturas read-only e mutáveis usam `SQLITE_OPEN_NOFOLLOW` no momento em
+  que o SQLite abre o arquivo. A validação de symlink feita ao carregar a
+  configuração não é suficiente para a última parte do caminho, pois o arquivo
+  pode ser substituído antes da abertura.
 - Mutações são permitidas somente para targets explicitamente marcados como
   `development` ou `test`; produção não é suportada nesta fatia.
 
@@ -27,10 +31,15 @@ conexões diferentes.
 
 O primeiro incremento é deliberadamente limitado a bancos SQLite locais e não
 implementa execução concorrente por namespaces, operações não transacionais ou
-recuperação de DDL indeterminado.
+recuperação de DDL indeterminado. `SQLITE_OPEN_NOFOLLOW` protege o componente
+final do caminho do banco; não declara proteção contra substituição concorrente
+de diretórios ancestrais nem de arquivos de migration após suas verificações.
 
 ## Evidências
 
 Testes usam arquivos SQLite reais temporários para provar read-only, rollback
 transacional, bloqueio de um segundo writer sem retry automático, execução de
-trigger com semicolons internos e recusa de comandos de controle.
+trigger com semicolons internos e recusa de comandos de controle. A regressão
+`storage::tests::sqlite_open_rejects_database_symlink_replaced_after_config_load`
+verifica que ambas as modalidades de abertura recusam um symlink introduzido
+depois que a configuração foi validada.

@@ -218,7 +218,10 @@ pub fn open_readonly(config: &LoadedConfig) -> Result<Option<Connection>> {
         return Ok(None);
     }
 
-    let connection = Connection::open_with_flags(database_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let connection = Connection::open_with_flags(
+        database_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )?;
     connection.busy_timeout(Duration::from_secs(
         config.config.execution.busy_timeout_seconds,
     ))?;
@@ -226,7 +229,10 @@ pub fn open_readonly(config: &LoadedConfig) -> Result<Option<Connection>> {
 }
 
 pub fn open_mutable(config: &LoadedConfig) -> Result<Connection> {
-    let connection = Connection::open(config.sqlite_database_path()?)?;
+    let connection = Connection::open_with_flags(
+        config.sqlite_database_path()?,
+        OpenFlags::default() | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )?;
     connection.busy_timeout(Duration::from_secs(
         config.config.execution.busy_timeout_seconds,
     ))?;
@@ -1556,9 +1562,10 @@ mod tests {
 
     use super::{
         LEGACY_METADATA_FORMAT_VERSION, METADATA_FORMAT_VERSION, ensure_schema, metadata_presence,
-        metadata_v4_presence, read_snapshot, read_snapshot_from_connection,
-        upgrade_metadata_v1_to_current, upgrade_metadata_v2_to_current,
-        upgrade_metadata_v3_to_current, upgrade_metadata_v4_to_current,
+        metadata_v4_presence, open_mutable, open_readonly, read_snapshot,
+        read_snapshot_from_connection, upgrade_metadata_v1_to_current,
+        upgrade_metadata_v2_to_current, upgrade_metadata_v3_to_current,
+        upgrade_metadata_v4_to_current,
     };
     use crate::config::{Environment, ExecutionConfig, LoadedConfig, SourceDir, TargetConfig};
 
@@ -1600,6 +1607,40 @@ mod tests {
                 .sqlite_database_path()
                 .expect("SQLite database path")
                 .exists()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sqlite_open_rejects_database_symlink_replaced_after_config_load() {
+        use std::os::unix::fs::symlink;
+
+        let project = tempfile::tempdir().expect("temporary project directory");
+        let outside = tempfile::tempdir().expect("temporary outside directory");
+        fs::create_dir_all(project.path().join("migrations"))
+            .expect("create migration source directory");
+        let config_path = project.path().join("dbm.toml");
+        fs::write(
+            &config_path,
+            "version = 1\nnamespace = \"default\"\nsource = [\"migrations\"]\n\n[target]\ndriver = \"sqlite\"\ndatabase = \"db.sqlite\"\nenvironment = \"development\"\n",
+        )
+        .expect("write SQLite project configuration");
+        let loaded = crate::config::load(&config_path).expect("load validated configuration");
+        let outside_database = outside.path().join("outside.sqlite");
+        fs::write(&outside_database, b"").expect("create outside SQLite target");
+        symlink(&outside_database, project.path().join("db.sqlite"))
+            .expect("replace target path with an outside symlink");
+
+        let readonly_open = open_readonly(&loaded);
+        let mutable_open = open_mutable(&loaded);
+
+        assert!(
+            readonly_open.is_err(),
+            "read-only open must not follow a target symlink swapped after config validation"
+        );
+        assert!(
+            mutable_open.is_err(),
+            "mutable open must not follow a target symlink swapped after config validation"
         );
     }
 

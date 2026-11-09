@@ -21,6 +21,18 @@ publishing a package, uploading release assets, or running database migrations.
   sandbox. No additional defect was confirmed in that limited pass, which does
   not satisfy the complete security-review requirement above; the G11 checkbox
   remains open.
+- A follow-up path-race regression on 2026-11-08 reproduced that SQLite could
+  follow a final-component database symlink swapped after configuration
+  validation. Read-only and mutable opens now use `SQLITE_OPEN_NOFOLLOW`; the
+  regression failed before and passed after the fix. The protection does not
+  cover ancestor-directory replacement or migration-file races, and this focused
+  fix is not a substitute for the missing complete, identifiable security review.
+- The current local checkout passed the all-features gate on 2026-11-08:
+  formatting, `git diff --check`, Clippy, 145 workspace tests (49 opt-in tests
+  ignored), build, both SQLite examples, and dependency/SBOM checks. Targeted
+  disposable-server runs also passed on PostgreSQL 17.11 and MariaDB 10.11.14/
+  11.4.13. These are local results, not remote CI for this working tree, and do
+  not complete the adapter/version matrix or security review; G11 stays open.
 - Commit `15b722ea5c871fae73ee40078bbeee28101fa62c` passed quality,
   supply-chain/SBOM, and performance in CI run
   [42534997418](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42534997418).

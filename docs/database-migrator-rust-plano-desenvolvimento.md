@@ -1687,6 +1687,28 @@ performance informativa). Nenhuma lógica de produção foi alterada. G11 contin
 parcial pelas lacunas de auditoria de segurança e da matriz registradas em
 `docs/recovery-drills.md`.
 
+**Retomada da matriz G11 — 2026-11-08:** a revisão da abertura SQLite reproduziu
+um symlink no componente final do banco introduzido depois do `config::load`;
+aberturas mutáveis e read-only agora usam `SQLITE_OPEN_NOFOLLOW`. A regressão
+falhou antes e passou depois, com a decisão e os limites registrados em
+`docs/adr/ADR-003-sqlite-locking-and-transactions.md`. No PostgreSQL 17.11
+descartável, no checkout atual, passaram 12 testes library/engine e 5 CLI,
+incluindo a observação #11 e a revalidação #12; 17.11 é evidência suplementar,
+não requisito para #11, cuja linha selecionada continua 18.6. MariaDB
+10.11.14 e 11.4.13 passaram cada uma 9 testes CLI não-TLS, 2 testes de adapter
+e a revalidação #12. Para executá-los, os guards de teste foram alinhados às
+quatro linhas MariaDB já declaradas. `docs/recovery-drills.md` e
+`docs/support-matrix.md` detalham limites e casos não executados.
+
+O gate local completo do checkout atual passou: formatação, `git diff --check`,
+Clippy com `-D warnings`, workspace all-features/locked (145 passed, 49 ignored,
+zero falhas), build, dois exemplos e `scripts/supply-chain.sh` com BOM CycloneDX
+validado e auditorias sem falhas (avisos não bloqueantes de versões duplicadas
+e allowances de licença sem uso). Isso ainda não fecha a matriz total nem a
+revisão de segurança: o relatório externo e os quatro registros
+`needs_validation` continuam indisponíveis e não corroborados. Não se infere
+ausência de issues críticas; G11 permanece parcial e sem aprovação.
+
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 
 **G12** — Tag estável com release notes, checksums assinados quando possível, binários homologados, changelog, upgrade guide, compatibilidade semver, matriz de testes publicada e exemplos de CI de deploy seguros.

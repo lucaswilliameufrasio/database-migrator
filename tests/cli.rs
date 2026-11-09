@@ -1624,6 +1624,16 @@ fn run_mysql_cli_contention_journey(environment_variable: &str, expected_vendor:
     cleanup.expect("drop isolated MySQL/MariaDB contention database");
 }
 
+fn is_tested_mariadb_line(server_version: &str) -> bool {
+    for prefix in ["10.11.", "11.4.", "11.8.", "13.0."] {
+        if server_version.starts_with(prefix) {
+            return true;
+        }
+    }
+
+    false
+}
+
 fn run_mysql_shared_schema_namespaces_journey(environment_variable: &str, expected_vendor: &str) {
     use std::net::IpAddr;
     use std::str::FromStr;
@@ -1655,7 +1665,7 @@ fn run_mysql_shared_schema_namespaces_journey(environment_variable: &str, expect
     if expected_vendor.eq_ignore_ascii_case("mariadb") {
         assert!(is_mariadb, "configured target is not MariaDB");
         assert!(
-            server_version.starts_with("11.8.") || server_version.starts_with("13.0."),
+            is_tested_mariadb_line(&server_version),
             "configured target is not a tested MariaDB line"
         );
     } else {
@@ -1977,7 +1987,7 @@ fn run_mysql_metadata_bootstrap_failure_journey(environment_variable: &str, expe
     if expected_vendor.eq_ignore_ascii_case("mariadb") {
         assert!(is_mariadb, "configured target is not MariaDB");
         assert!(
-            server_version.starts_with("11.8.") || server_version.starts_with("13.0."),
+            is_tested_mariadb_line(&server_version),
             "configured target is not a tested MariaDB line"
         );
     } else {
@@ -2199,8 +2209,7 @@ fn run_mysql_metadata_upgrade_failure_journey(environment_variable: &str, expect
     let is_mariadb = server_version.to_ascii_lowercase().contains("mariadb");
     if expected_vendor.eq_ignore_ascii_case("mariadb") {
         assert!(
-            is_mariadb
-                && (server_version.starts_with("11.8.") || server_version.starts_with("13.0.")),
+            is_mariadb && is_tested_mariadb_line(&server_version),
             "configured target is not a tested MariaDB line"
         );
     } else {
@@ -2545,7 +2554,7 @@ fn run_mysql_post_intent_before_sql_journey(environment_variable: &str, expected
     if expected_vendor.eq_ignore_ascii_case("mariadb") {
         assert!(is_mariadb, "configured target is not MariaDB");
         assert!(
-            server_version.starts_with("11.8.") || server_version.starts_with("13.0."),
+            is_tested_mariadb_line(&server_version),
             "configured target is not a tested MariaDB line"
         );
     } else {
@@ -2774,7 +2783,7 @@ fn run_mysql_before_intent_journey(environment_variable: &str, expected_vendor: 
     if expected_vendor.eq_ignore_ascii_case("mariadb") {
         assert!(is_mariadb, "configured target is not MariaDB");
         assert!(
-            server_version.starts_with("11.8.") || server_version.starts_with("13.0."),
+            is_tested_mariadb_line(&server_version),
             "configured target is not a tested MariaDB line"
         );
     } else {
@@ -3047,7 +3056,7 @@ fn run_mysql_acknowledgement_boundary_journey(
     if expected_vendor.eq_ignore_ascii_case("mariadb") {
         assert!(is_mariadb, "configured target is not MariaDB");
         assert!(
-            server_version.starts_with("11.8.") || server_version.starts_with("13.0."),
+            is_tested_mariadb_line(&server_version),
             "configured target is not a tested MariaDB line"
         );
     } else {
