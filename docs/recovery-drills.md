@@ -78,6 +78,45 @@ MySQL 8.4.11, 8.4.13, and 9.7.4, and MariaDB 11.8.2, 11.8.9, and 13.0.2.
 This adds #1, #2, #4, #5, #8, #9, and #10 evidence on those patch lines; it
 does not fill the other matrix gaps.
 
+**SQLite #11 follow-up — 2026-11-08:** the quality job in CI run
+`42543796008` for commit `53b12921b0af8691a5ab17fa65ccf8d5d741b2a4` failed in
+`sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved`: the
+child exited with code 6 before the harness captured the persistence window.
+The CI job and prior local execution had both observed the started run, journal,
+and rollback before losing the observation window; this is a harness failure,
+not evidence that migration data committed. The harness now opens a second
+SQLite connection after rollback, holds a read transaction on the run table, and
+keeps that commit blocker until after killing the CLI. The focused regression
+passed six consecutive local executions after this change. The full local gate
+then passed on the corrected working tree (145 tests passed, 49 opt-in tests
+ignored, zero failures, plus formatting, Clippy, build, examples, and
+supply-chain checks). Remote CI for the correction is still pending, so preserve
+the earlier CI failure rather than treating local passes as a remote result.
+
+**MariaDB 10.11.14/11.4.13 clean repeat — 2026-11-08:** four fresh disposable
+rootless-Docker instances, one per pass, were bound only to loopback. On each
+version, each clean pass ran and passed 9 non-TLS CLI recovery/metadata tests, 2
+adapter metadata/import tests, the engine source-revalidation #12 test, the
+MariaDB DSL Up/Down test, and the SQLx legacy-import cutover test. The official
+image digests were `sha256:dbe56e20372fc6d6b8e0e396866ba89c4c7f128c38c4f59aaa54d957db95790c`
+for 10.11.14 and
+`sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620` for
+11.4.13. The earlier second pass that reused a database and failed because
+metadata was left behind is excluded; this repeat used independent clean
+containers. TLS CA/hostname validation passed once per version on separate
+fresh loopback instances using an ephemeral local CA.
+
+**Complete opt-in suite on MariaDB 10.11.14/11.4.13 — 2026-11-08:** the full
+workspace selection of 45 ignored network tests passed once for each MariaDB
+line, in separate fresh rootless-Docker combinations with PostgreSQL 18.6 and
+MySQL 8.4.13. Each run passed 16 library, 23 CLI, 3 DSL, and 3 legacy-import
+tests. PgBouncer and the three server-TLS tests were excluded from this 45-test
+selection; the MariaDB TLS CA/hostname test separately passed once on each of
+these two lines. Ports were published only on loopback, images were already
+cached (`--pull=never`), and all three containers were removed after each run.
+Logs are in `/mnt/storage/projects/.scratch/dbm-g11-validation-20261108/` as
+`mariadb-10.11.14-full-opt-in.log` and `mariadb-11.4.13-full-opt-in.log`.
+
 **Complete opt-in suite and TLS checks — 2026-11-07:** 45 ignored tests (library,
 CLI, DSL, and legacy-import network tests) passed in each of four full workspace
 runs with fresh loopback databases: (1) PostgreSQL 16.15, MySQL 8.4.13, MariaDB
@@ -143,7 +182,7 @@ named tests and versions above, not every supported version.
 | SQLite | #3, #8, #9; #10 for fault-injected initial bootstrap and v4→v5 upgrade; #11 for crash after rollback and during failed-run persistence; #12 at engine/source-revalidation level. SQLite open also rejects a final-component database symlink swapped after config validation; see ADR-003. | #6 is MySQL/MariaDB-specific. #1, #2, #4 and #5 have no separate crash-boundary test; SQLite keeps migration SQL and per-step journal changes in one transaction, so those are not independently durable states. #7 is partially represented by process death and file-lock recovery in #3/#8, but is not a native server-session lock test. CLI approval reuse is not part of the owner-accepted current contract for #12. |
 | PostgreSQL | #1–#5 and #7–#11 on disposable 16.15 and 18.6; includes the CLI recovery boundary bundle, shared-schema race, same-namespace contention, bootstrap rollback, v4→v5 prior-DDL rollback and rollback-before-failure-record. A supplemental 17.11 run on 2026-11-08 passed 12 library/engine and 5 CLI tests, including the recovery-boundary bundle and source-revalidation #12. #12 has engine-level revalidation coverage on 16.15, 17.11, and 18.6. | #6 is MySQL/MariaDB-specific. The project owner selected current stable 18.6 as the required G11 line for #11; 17.11 is supplemental evidence, not an added requirement. Other PostgreSQL versions remain unverified for these focused runs. |
 | MySQL | #1, #2, #4, #5, #8, #9 and #10 have focused CLI evidence on 8.4.11, 8.4.13, and 9.7.4; the eight MySQL opt-in recovery/metadata tests passed twice on all three versions. The aggregated non-transactional journey for #3/#6/#7 also passed twice on the documented lines. Engine source-revalidation #12 passed twice on all three versions. The full 45-test ignored suite passed on 8.4.11, 8.4.13, and 9.7.4 in the four combinations above. | #11 is not applicable under ADR-016 because this profile requires `transaction=never`; source discovery regression-tests rejection of `transaction=always`. CLI approval reuse is not part of the owner-accepted current contract for #12. Other versions and some sub-boundaries remain unverified. |
-| MariaDB | #1, #2, #4, #5, #8, #9 and #10 have focused CLI evidence on 11.8.2, 11.8.9, and 13.0.2; the eight MariaDB opt-in recovery/metadata tests passed twice on all three versions. On 10.11.14 and 11.4.13, 9 non-TLS CLI tests, 2 adapter tests and engine source-revalidation #12 passed once each on 2026-11-08. The aggregated non-transactional journey for #3/#6/#7 also passed twice on the newer documented lines. Engine source-revalidation #12 passed twice on 11.8.2, 11.8.9, and 13.0.2. The full 45-test ignored suite passed on 11.8.2, 11.8.9, and 13.0.2 in the four combinations above, with direct adapter tests additionally confirmed on the two newer lines. | #11 is not applicable under the shared MySQL/MariaDB profile in ADR-016 because migrations require `transaction=never`; source discovery regression-tests rejection of `transaction=always`. CLI approval reuse is not part of the owner-accepted current contract for #12. TLS fixtures and the full ignored suite are not verified on 10.11.14 or 11.4.13. Other versions and some sub-boundaries remain unverified. |
+| MariaDB | #1, #2, #4, #5, #8, #9 and #10 have focused CLI evidence on 11.8.2, 11.8.9, and 13.0.2; the eight MariaDB opt-in recovery/metadata tests passed twice on all three versions. On 10.11.14 and 11.4.13, each of two independent clean passes ran 9 non-TLS CLI tests, 2 adapter tests, engine source-revalidation #12, DSL Up/Down, and SQLx legacy import; TLS CA/hostname validation also passed once per version. The full 45-test ignored workspace suite also passed once on each of those versions, each paired with PostgreSQL 18.6/MySQL 8.4.13; PgBouncer and three TLS tests were excluded from that selection, with MariaDB TLS verified separately. The aggregated non-transactional journey for #3/#6/#7 passed twice on the newer documented lines. Engine source-revalidation #12 passed twice on 11.8.2, 11.8.9, and 13.0.2. The full 45-test ignored suite passed on 11.8.2, 11.8.9, and 13.0.2 in the four combinations above, with direct adapter tests additionally confirmed on the two newer lines. | #11 is not applicable under the shared MySQL/MariaDB profile in ADR-016 because migrations require `transaction=never`; source discovery regression-tests rejection of `transaction=always`. CLI approval reuse is not part of the owner-accepted current contract for #12. Other versions and some sub-boundaries remain unverified. |
 
 **MariaDB 10.11.14/11.4.13 one-pass subset — 2026-11-08:** disposable
 rootless-Docker instances bound only to loopback used the official images

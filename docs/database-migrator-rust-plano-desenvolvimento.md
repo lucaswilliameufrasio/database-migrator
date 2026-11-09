@@ -1695,10 +1695,14 @@ falhou antes e passou depois, com a decisão e os limites registrados em
 descartável, no checkout atual, passaram 12 testes library/engine e 5 CLI,
 incluindo a observação #11 e a revalidação #12; 17.11 é evidência suplementar,
 não requisito para #11, cuja linha selecionada continua 18.6. MariaDB
-10.11.14 e 11.4.13 passaram cada uma 9 testes CLI não-TLS, 2 testes de adapter
-e a revalidação #12. Para executá-los, os guards de teste foram alinhados às
+10.11.14 e 11.4.13 passaram cada uma duas rodadas limpas de 9 testes CLI
+não-TLS, 2 testes de adapter, revalidação #12, DSL Up/Down e importação SQLx;
+TLS CA/hostname passou uma vez em cada linha. A suíte opt-in completa passou uma
+vez em cada uma das duas linhas, em combinações descartáveis com PostgreSQL
+18.6/MySQL 8.4.13 (45 testes; PgBouncer e três casos TLS foram excluídos; o TLS
+MariaDB foi exercitado separadamente). Os guards de teste foram alinhados às
 quatro linhas MariaDB já declaradas. `docs/recovery-drills.md` e
-`docs/support-matrix.md` detalham limites e casos não executados.
+`docs/support-matrix.md` detalham os limites restantes.
 
 O gate local completo do checkout atual passou: formatação, `git diff --check`,
 Clippy com `-D warnings`, workspace all-features/locked (145 passed, 49 ignored,
@@ -1708,6 +1712,20 @@ e allowances de licença sem uso). Isso ainda não fecha a matriz total nem a
 revisão de segurança: o relatório externo e os quatro registros
 `needs_validation` continuam indisponíveis e não corroborados. Não se infere
 ausência de issues críticas; G11 permanece parcial e sem aprovação.
+
+**Reabertura do gate CI e sincronização do teste SQLite #11 — 2026-11-08:** o
+commit `53b12921b0af8691a5ab17fa65ccf8d5d741b2a4` foi enviado a `main`, mas a CI
+`42543796008` falhou no teste #11: a CLI saiu com código 6 antes de o harness
+capturar a janela de persistência após rollback. O job supply-chain passou e o
+job de performance não executou; esse SHA não tem CI verde. O teste local agora
+mantém uma transação de leitura em `schema_migration_runs` depois de observar o
+rollback, bloqueando o commit da atualização `failed` até a CLI ser encerrada.
+O teste focado passou seis vezes localmente e o gate local completo
+pós-alteração passou (145 testes, 49 opt-in ignorados, zero falhas; formatação,
+Clippy, build, exemplos e supply-chain também verdes). A CI do SHA corrigido
+ainda não foi verificada; o resultado anterior do commit `de529ce` não valida
+esta revisão. G11 continua ativo e pendente, além das lacunas de matriz e da
+revisão de segurança identificável/completa descritas acima.
 
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 

@@ -29,10 +29,12 @@ publishing a package, uploading release assets, or running database migrations.
   fix is not a substitute for the missing complete, identifiable security review.
 - The current local checkout passed the all-features gate on 2026-11-08:
   formatting, `git diff --check`, Clippy, 145 workspace tests (49 opt-in tests
-  ignored), build, both SQLite examples, and dependency/SBOM checks. Targeted
-  disposable-server runs also passed on PostgreSQL 17.11 and MariaDB 10.11.14/
-  11.4.13. These are local results, not remote CI for this working tree, and do
-  not complete the adapter/version matrix or security review; G11 stays open.
+  ignored), build, both SQLite examples, and dependency/SBOM checks. Disposable
+  server runs passed on PostgreSQL 17.11 and MariaDB 10.11.14/11.4.13; each older
+  MariaDB line also passed the 45-test opt-in suite paired with PostgreSQL 18.6
+  and MySQL 8.4.13, plus its TLS CA/hostname test. These are local results, not
+  remote CI for the corrected harness, and do not resolve the inaccessible
+  external security review; G11 stays open.
 - Commit `15b722ea5c871fae73ee40078bbeee28101fa62c` passed quality,
   supply-chain/SBOM, and performance in CI run
   [42534997418](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42534997418).
@@ -44,6 +46,15 @@ publishing a package, uploading release assets, or running database migrations.
   including the widened SQLite #11 test, dependency audit/SBOM, and informational
   performance baseline. This closes remote verification for that test-only
   adjustment; it does not close the security review or the remaining matrix rows.
+- Commit `53b12921b0af8691a5ab17fa65ccf8d5d741b2a4` did not pass CI run
+  [42543796008](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42543796008):
+  quality failed in the SQLite #11 observation-window test, supply-chain passed,
+  and performance did not run because its dependencies failed. A local harness
+  correction now holds a SQLite read transaction after rollback; its focused test
+  passed six times and the complete local gate passed on the corrected working
+  tree (145 passed, 49 ignored, zero failures). CI on the correction remains
+  pending. Do not treat the earlier green CI for `de529ce` as verification of this
+  newer harness version.
 - [x] Draft changelog, upgrade guide, support matrix, and release checklist
       prepared.
 - [x] CI configuration for dependency audit and ephemeral CycloneDX SBOM

@@ -4359,6 +4359,7 @@ fn sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved() {
     let mut migration_journal_seen = false;
     let mut rollback_seen = false;
     let mut failed_run_persistence_observed = false;
+    let mut failed_run_commit_blocker = None;
     while Instant::now() < deadline {
         if let Some(status) = child.try_wait().expect("poll SQLite migration process") {
             let output = child
@@ -4390,6 +4391,19 @@ fn sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved() {
                 migration_journal_seen = true;
             } else if migration_journal_seen {
                 rollback_seen = true;
+                if failed_run_commit_blocker.is_none() {
+                    let blocker = rusqlite::Connection::open(&database_path)
+                        .expect("open SQLite rollback observer");
+                    blocker
+                        .execute_batch("BEGIN DEFERRED")
+                        .expect("begin SQLite rollback observation transaction");
+                    let _: i64 = blocker
+                        .query_row("SELECT COUNT(*) FROM schema_migration_runs", [], |row| {
+                            row.get(0)
+                        })
+                        .expect("hold a SQLite read lock after migration rollback");
+                    failed_run_commit_blocker = Some(blocker);
+                }
             }
             if rollback_seen && journal_path.exists() {
                 failed_run_persistence_observed = true;
@@ -4417,6 +4431,7 @@ fn sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved() {
         .wait()
         .expect("reap SQLite process killed after rollback");
     assert!(!killed.success());
+    drop(failed_run_commit_blocker);
 
     let database = rusqlite::Connection::open(&database_path)
         .expect("inspect SQLite state after rollback-window crash");

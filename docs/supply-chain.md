@@ -548,6 +548,24 @@ does not establish variance across runners. G11 remains partial: the complete
 security review/external records and remaining applicable adapter/version/
 failure-boundary evidence are still open.
 
+**SQLite #11 follow-up CI failure and local harness correction — 2026-11-08:**
+CI run `42543796008` for commit
+`53b12921b0af8691a5ab17fa65ccf8d5d741b2a4` failed the quality job in
+`sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved`; the
+child exited with code 6 before the harness captured the rollback-to-failure
+record window. The supply-chain job passed; the performance job did not run
+because it depends on both preceding jobs. The failure remains part of the
+record and does not establish a product-data failure. The local harness now
+holds a SQLite read transaction on `schema_migration_runs` after observing
+rollback, preventing the failed-run commit from closing the observation window
+before the CLI is killed. The focused test passed six consecutive local runs.
+The full post-change local gate has since passed (145 workspace tests passed,
+49 opt-in tests ignored, zero failures, plus formatting, Clippy, build, examples,
+and supply-chain checks). A remote run on a corrected SHA has not yet passed; no
+successful CI result is inferred for this correction. The older
+100M-iteration trigger-only evidence and CI result on `de529ce` remain valid for
+that earlier test version, not for the current read-lock harness correction.
+
 **Rollback-window test CI flake and hardening — 2026-11-08:** the initial
 quality attempt of run `42536081938` on `199cc07dd0a0594b4d8b7b110283d72c27a1262d`
 failed in `sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved`:
@@ -578,13 +596,20 @@ its configured-CA fixture and failed its `sslmode` precondition; the successful
 rerun excluded that TLS-only case. PostgreSQL 18.6 remains the owner-selected
 required line for #11; 17.11 evidence is supplemental.
 
-On official MariaDB 10.11.14 and 11.4.13 images, each disposable loopback run
-passed 9 non-TLS CLI recovery/metadata tests, 2 adapter metadata/import tests,
-and engine source-revalidation #12. This exposed stale test-only vendor guards
-that accepted only MariaDB 11.8/13.0 despite the already-declared 10.11/11.4
-support lines. The guards now recognize all four declared MariaDB lines. The
-full ignored suite and TLS fixtures were not run on 10.11.14/11.4.13; MySQL-family
-#11 remains inapplicable under `transaction=never`.
+On official MariaDB 10.11.14 and 11.4.13 images, each of two fresh disposable
+loopback runs passed 9 non-TLS CLI recovery/metadata tests, 2 adapter
+metadata/import tests, engine source-revalidation #12, DSL Up/Down, and SQLx
+legacy-import cutover. The TLS CA/hostname check also passed once per version
+with an ephemeral local CA. This exposed stale test-only vendor guards that
+accepted only MariaDB 11.8/13.0 despite the already-declared 10.11/11.4 support
+lines. The guards now recognize all four declared MariaDB lines. The complete
+45-test ignored workspace suite passed once on each of MariaDB 10.11.14 and
+11.4.13, each paired with disposable PostgreSQL 18.6 and MySQL 8.4.13; PgBouncer
+and the three server-TLS tests were excluded from that selection. The MariaDB
+TLS CA/hostname test passed separately on each line. The two full-suite logs
+and image digests are retained under
+`/mnt/storage/projects/.scratch/dbm-g11-validation-20261108/`. MySQL-family #11
+remains inapplicable under `transaction=never`.
 
 The final local gate on this working tree passed formatting, `git diff --check`,
 Clippy (`-D warnings`), the all-features locked workspace tests (145 passed, 49
