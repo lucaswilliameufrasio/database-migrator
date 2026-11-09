@@ -160,9 +160,12 @@ making the trigger establish its write/journal window before the delay. The
 focused test passed six consecutive runs, the complete local gate passed (147
 tests, 49 opt-in tests ignored; format, Clippy, build, examples, and
 supply-chain), and `cargo +1.89.0 test --workspace --all-features --locked`
-passed on the corrected working tree. This correction has not yet been verified
-by remote CI; the new commit's CI result is required before treating #11 as
-stable.
+passed on the corrected working tree. Commit
+`6d613c2606f6714dff728fbb749385f23d9ea888` then passed all three jobs in CI run
+[42562827192](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/42562827192):
+quality/tests/build/examples, dependency audit/SBOM, and informational
+performance. This verifies the corrected #11 harness on that SHA. It does not
+close G11's separate security-review or fault-matrix requirements.
 
 **Supplemental complete opt-in suite on PostgreSQL 17.11 — 2026-11-08:** the
 45-test ignored workspace selection passed against disposable PostgreSQL 17.11,

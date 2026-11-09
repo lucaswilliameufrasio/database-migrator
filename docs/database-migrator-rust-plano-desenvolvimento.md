@@ -1780,9 +1780,11 @@ CTE lenta do trigger avaliar antes de efetivar a primeira escrita. A correção
 local grava uma sentinela antes da CTE: seis execuções focadas passaram, assim
 como o gate local completo (147 testes, 49 opt-in ignorados) e
 `cargo +1.89.0 test --workspace --all-features --locked`. O audit/SBOM passou na
-CI que falhou; performance não executou. O novo harness ainda aguarda CI remoto;
-G11 permanece aberto até essa verificação e as pendências de segurança e matriz
-serem resolvidas ou formalmente delimitadas.
+CI que falhou; performance não executou. O commit de correção `6d613c2` passou
+os três jobs no CI `42562827192` (quality/test/build/examples, audit/SBOM e
+performance), verificando o harness corrigido nesse SHA. G11 continua aberto
+pelas pendências independentes de segurança e matriz, que ainda precisam ser
+resolvidas ou formalmente delimitadas.
 
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 
