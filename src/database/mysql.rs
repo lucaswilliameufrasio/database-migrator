@@ -2410,9 +2410,6 @@ async fn prepare_connection_options(
 
 fn is_local_mysql_host(opts: &Opts) -> bool {
     let hostname = opts.ip_or_hostname();
-    if hostname.eq_ignore_ascii_case("localhost") {
-        return true;
-    }
     if IpAddr::from_str(hostname).is_ok_and(|address| address.is_loopback()) {
         return true;
     }
@@ -2544,7 +2541,9 @@ mod tests {
         ensure_supported_server_version, is_local_mysql_host, mysql_lock_name,
         normalized_check_clause, prepare_connection_options,
     };
-    use crate::config::{Config, Environment, ExecutionConfig, LoadedConfig, TargetConfig};
+    use crate::config::{
+        Config, Environment, ExecutionConfig, LoadedConfig, ProjectDirectory, TargetConfig,
+    };
     use crate::database::{DatabaseAdapter, DatabaseSession, SessionIntent};
     use crate::error::DbmError;
     use crate::legacy::{LegacyImportWrite, LegacyTool};
@@ -2572,6 +2571,10 @@ mod tests {
             },
             source_dirs: Vec::new(),
             database_path: None,
+            project_directory: ProjectDirectory::open_ambient(
+                &std::env::current_dir().expect("current test directory"),
+            )
+            .expect("open test project directory"),
         }
     }
 
@@ -2684,11 +2687,45 @@ mod tests {
                 .expect("prepare explicit local plaintext options");
         assert!(local_options.ssl_opts().is_none());
 
+        let unresolved_localhost = prepare_connection_options(
+            "mysql://root@localhost/test_db?prefer_socket=false",
+            &local_config,
+        )
+        .await
+        .expect("unresolved hostname uses TLS");
+        assert!(
+            unresolved_localhost.ssl_opts().is_some(),
+            "a hostname without pinned loopback addresses must not select plaintext"
+        );
+
         let remote_options =
             prepare_connection_options("mysql://root@db.example.invalid/test_db", &local_config)
                 .await
                 .expect("remote opt-in still uses TLS");
         assert!(remote_options.ssl_opts().is_some());
+    }
+
+    #[test]
+    fn mysql_plaintext_hostname_requires_all_resolved_addresses_to_be_loopback() {
+        let hostname = Opts::from_url("mysql://root@localhost/test_db?prefer_socket=false")
+            .expect("parse localhost URL");
+        assert!(!is_local_mysql_host(&hostname));
+
+        let loopback_addresses = OptsBuilder::from_opts(hostname.clone())
+            .resolved_ips(Some(vec![
+                "127.0.0.1".parse().expect("parse IPv4 loopback"),
+                "::1".parse().expect("parse IPv6 loopback"),
+            ]))
+            .into();
+        assert!(is_local_mysql_host(&loopback_addresses));
+
+        let mixed_addresses = OptsBuilder::from_opts(hostname)
+            .resolved_ips(Some(vec![
+                "127.0.0.1".parse().expect("parse IPv4 loopback"),
+                "192.0.2.1".parse().expect("parse documentation address"),
+            ]))
+            .into();
+        assert!(!is_local_mysql_host(&mixed_addresses));
     }
 
     #[tokio::test]

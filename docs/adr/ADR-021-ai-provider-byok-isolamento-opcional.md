@@ -25,6 +25,9 @@ de habilitação.
   do segredo e limites de timeout/tokens. O valor do segredo só é lido no
   momento da requisição, enviado exclusivamente no cabeçalho de autorização e
   nunca serializado, impresso ou incluído em erros.
+- O endpoint do profile só pode receber a credencial quando corresponde a
+  `DBM_AI_APPROVED_ENDPOINT`, definida pelo ambiente confiável do invocador; o
+  vínculo e sua justificativa estão detalhados no ADR-023.
 - `MigrationProposal` e relatórios de review/explain são dados não confiáveis,
   validados contra schemas estritos. As operações AI só produzem JSON/propostas;
   não escrevem migrations locais, não alteram metadata e não oferecem `--apply`.

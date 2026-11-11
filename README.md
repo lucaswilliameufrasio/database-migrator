@@ -85,7 +85,10 @@ PostgreSQL connections require TLS with certificate-chain and hostname
 validation against the WebPKI root set. For an explicitly local development or
 test database only, plaintext requires all three: `sslmode=disable` in the
 connection value, `allow_insecure_transport = true` in `[target]`, and a
-loopback/Unix-socket host. Production configs reject that option. Private CA
+numeric loopback address (or a PostgreSQL Unix-socket host). A hostname such as
+`localhost` is not sufficient unless PostgreSQL also has an explicit loopback
+`hostaddr`, or MySQL has pinned loopback `resolved_ips`; production configs
+reject that option. Private CA
 certificates can be added from a PEM file referenced by the environment
 variable named in `tls_ca_cert_env`; the file path is not stored in the config.
 PostgreSQL `up`/`down` are enabled for non-production targets after the G4
@@ -251,8 +254,12 @@ cargo build --features ai
 
 AI remains disabled until `[ai].enabled = true`. Profiles store only a reference
 to the API-key environment variable; the secret itself must be supplied by the
-calling environment. The endpoint must use HTTPS, except for loopback HTTP used
-by local test servers.
+calling environment. The caller must also set `DBM_AI_APPROVED_ENDPOINT` in the
+process environment to the exact profile endpoint it approves. DBM checks that
+binding before reading the API key and sends requests to the approved endpoint,
+not to a destination chosen only by project configuration. The endpoint must
+use HTTPS, except for loopback HTTP used by local test servers. Context preview
+does not need this approval because it neither reads the key nor makes a request.
 
 ```toml
 [ai]
@@ -269,9 +276,10 @@ max_tokens = 4096
 max_context_bytes = 131072
 ```
 
-After setting `DBM_AI_API_KEY` in the process environment and explicitly
-enabling AI, the commands `dbm ai generate`, `review`, `explain`, and
-`suggest-down` return proposal/review JSON. `--preview-context` shows the exact
+After setting both `DBM_AI_API_KEY` and `DBM_AI_APPROVED_ENDPOINT` in the
+trusted invoking environment and explicitly enabling AI, the commands `dbm ai
+generate`, `review`, `explain`, and `suggest-down` return proposal/review JSON.
+`--preview-context` shows the exact
 messages without resolving the secret or making a request. Context files must
 be selected explicitly and remain inside configured migration sources; plan
 files for `explain` must remain inside the project. Prompt context is redacted
@@ -303,6 +311,8 @@ binary must resolve to a file inside the project. In runner mode, CLI
 compiled registry; `doctor reconcile` remains unavailable and fails closed.
 Handshake, timeout, or fingerprint failures never fall back to applying only
 filesystem SQL. `plan` and the read-only commands do not initialize metadata.
+Before starting, DBM snapshots the selected runner bytes into a private
+temporary directory and hashes and executes that same snapshot.
 For an embedded application, call `engine::up_with_registry_async` or
 `engine::down_with_registry_async` explicitly; importing the library never
 runs migrations. The runner executes trusted native project code and is **not

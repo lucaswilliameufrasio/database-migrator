@@ -23,14 +23,23 @@ fn configure_project(directory: &Path, endpoint: &str, enabled: bool) {
     fs::write(directory.join("dbm.toml"), config).expect("write project config");
 }
 
-fn run_cli(directory: &Path, arguments: &[&str], include_secret: bool) -> Output {
+fn run_cli(
+    directory: &Path,
+    arguments: &[&str],
+    include_secret: bool,
+    approved_endpoint: Option<&str>,
+) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_dbm"));
     command
         .current_dir(directory)
         .args(arguments)
-        .env_remove("DBM_AI_TEST_SECRET");
+        .env_remove("DBM_AI_TEST_SECRET")
+        .env_remove("DBM_AI_APPROVED_ENDPOINT");
     if include_secret {
         command.env("DBM_AI_TEST_SECRET", TEST_SECRET);
+    }
+    if let Some(approved_endpoint) = approved_endpoint {
+        command.env("DBM_AI_APPROVED_ENDPOINT", approved_endpoint);
     }
     command.output().expect("start dbm CLI")
 }
@@ -137,6 +146,7 @@ fn generate_uses_local_openai_compatible_provider_and_never_writes_or_applies() 
             "Create a things table",
         ],
         true,
+        Some(&endpoint),
     );
     assert!(
         result.status.success(),
@@ -218,6 +228,7 @@ fn review_explain_and_suggest_down_use_their_distinct_strict_contracts() {
             migration_relative,
         ],
         true,
+        Some(&endpoint),
     );
     assert!(
         review.status.success(),
@@ -251,6 +262,7 @@ fn review_explain_and_suggest_down_use_their_distinct_strict_contracts() {
             "plan.json",
         ],
         true,
+        Some(&endpoint),
     );
     assert!(
         explain.status.success(),
@@ -286,6 +298,7 @@ fn review_explain_and_suggest_down_use_their_distinct_strict_contracts() {
             migration_relative,
         ],
         true,
+        Some(&endpoint),
     );
     assert!(
         suggest_down.status.success(),
@@ -331,6 +344,7 @@ fn preview_needs_no_secret_or_network_and_ai_has_no_apply_flag() {
             "--preview-context",
         ],
         false,
+        None,
     );
     assert!(
         preview.status.success(),
@@ -351,6 +365,7 @@ fn preview_needs_no_secret_or_network_and_ai_has_no_apply_flag() {
         directory.path(),
         &["--config", "dbm.toml", "--format", "json", "plan"],
         true,
+        None,
     );
     assert!(ordinary_plan.status.success());
     assert!(
@@ -369,12 +384,56 @@ fn preview_needs_no_secret_or_network_and_ai_has_no_apply_flag() {
             "--apply",
         ],
         false,
+        None,
     );
     assert!(!apply.status.success());
     assert!(String::from_utf8_lossy(&apply.stderr).contains("unexpected argument"));
     assert!(
         listener.accept().is_err(),
         "unsupported --apply must not connect"
+    );
+}
+
+#[test]
+fn project_profile_cannot_send_a_secret_to_an_unapproved_endpoint() {
+    let directory = tempfile::tempdir().expect("temporary project");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind configured endpoint sentinel");
+    listener
+        .set_nonblocking(true)
+        .expect("make endpoint sentinel nonblocking");
+    let address = listener
+        .local_addr()
+        .expect("read configured endpoint address");
+    let configured_endpoint = format!("http://{address}/v1");
+    configure_project(directory.path(), &configured_endpoint, true);
+
+    let result = run_cli(
+        directory.path(),
+        &[
+            "--config",
+            "dbm.toml",
+            "--format",
+            "json",
+            "ai",
+            "generate",
+            "Add a table",
+        ],
+        true,
+        Some("http://127.0.0.1:1/v1"),
+    );
+
+    assert!(!result.status.success());
+    let report: Value = serde_json::from_slice(&result.stdout).expect("decode AI error report");
+    assert_eq!(report["errors"][0]["code"], "AI_ENDPOINT_NOT_APPROVED");
+    let emitted = format!(
+        "{}{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(!emitted.contains(TEST_SECRET));
+    assert!(
+        listener.accept().is_err(),
+        "an unapproved project endpoint must receive no request"
     );
 }
 
@@ -396,6 +455,7 @@ fn provider_failures_have_stable_json_codes_and_never_include_the_secret() {
             "Add a table",
         ],
         true,
+        Some(&endpoint),
     );
     assert!(!result.status.success());
     let report: Value = serde_json::from_slice(&result.stdout).expect("decode failure report");

@@ -1,8 +1,12 @@
 use std::collections::BTreeMap;
-use std::fs::{self, OpenOptions};
+use std::fmt;
+use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
+use cap_std::ambient_authority;
+use cap_std::fs::{Dir, OpenOptions};
 use serde::Deserialize;
 
 use crate::error::{DbmError, Result};
@@ -111,7 +115,49 @@ impl Default for ExecutionConfig {
 #[derive(Clone, Debug)]
 pub(crate) struct SourceDir {
     pub(crate) path: PathBuf,
+    pub(crate) relative_path: PathBuf,
     pub(crate) logical_path: String,
+}
+
+#[derive(Clone)]
+pub(crate) struct ProjectDirectory {
+    path: PathBuf,
+    directory: Arc<Dir>,
+}
+
+impl ProjectDirectory {
+    pub(crate) fn open_ambient(path: &Path) -> std::io::Result<Self> {
+        let directory = Dir::open_ambient_dir(path, ambient_authority())?;
+        Ok(Self {
+            path: path.to_path_buf(),
+            directory: Arc::new(directory),
+        })
+    }
+
+    pub(crate) fn open_dir(&self, path: &Path) -> std::io::Result<Self> {
+        let directory = self.directory.open_dir(path)?;
+        Ok(Self {
+            path: self.path.join(path),
+            directory: Arc::new(directory),
+        })
+    }
+
+    pub(crate) fn dir(&self) -> &Dir {
+        self.directory.as_ref()
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl fmt::Debug for ProjectDirectory {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("ProjectDirectory")
+            .field(&self.path)
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -119,6 +165,7 @@ pub struct LoadedConfig {
     pub(crate) config: Config,
     pub(crate) source_dirs: Vec<SourceDir>,
     pub(crate) database_path: Option<PathBuf>,
+    pub(crate) project_directory: ProjectDirectory,
 }
 
 impl LoadedConfig {
@@ -171,6 +218,8 @@ pub fn load(path: &Path) -> Result<LoadedConfig> {
         None => current_dir.clone(),
     };
     let root = fs::canonicalize(&root).map_err(|error| DbmError::io(root.display(), error))?;
+    let project_directory = ProjectDirectory::open_ambient(&root)
+        .map_err(|error| DbmError::io(root.display(), error))?;
     let config_path = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -192,8 +241,12 @@ pub fn load(path: &Path) -> Result<LoadedConfig> {
                 source_path.display()
             )));
         }
+        project_directory
+            .open_dir(source)
+            .map_err(|error| DbmError::io(source_path.display(), error))?;
         source_dirs.push(SourceDir {
             path: source_path,
+            relative_path: source.clone(),
             logical_path,
         });
     }
@@ -252,6 +305,7 @@ pub fn load(path: &Path) -> Result<LoadedConfig> {
         database_path,
         config,
         source_dirs,
+        project_directory,
     })
 }
 
@@ -290,7 +344,9 @@ pub fn initialize_with_namespace(path: &Path, namespace: &str) -> Result<()> {
     fs::create_dir_all(&root).map_err(|error| DbmError::io(root.display(), error))?;
     let canonical_root =
         fs::canonicalize(&root).map_err(|error| DbmError::io(root.display(), error))?;
-    let migrations_dir = ensure_project_directory(&canonical_root, "migrations")?;
+    let project_directory = ProjectDirectory::open_ambient(&canonical_root)
+        .map_err(|error| DbmError::io(canonical_root.display(), error))?;
+    let migrations_dir = ensure_project_directory(&project_directory, "migrations")?;
     ensure_project_directory(&migrations_dir, "versioned")?;
 
     let contents = format!(
@@ -300,36 +356,39 @@ pub fn initialize_with_namespace(path: &Path, namespace: &str) -> Result<()> {
          [ai]\nenabled = false\nprovider = \"openai-compatible\"\nprofile = \"default\"\n"
     );
 
-    let parent = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty());
-    let temporary_path = match parent {
-        Some(parent) => parent.join(format!(".dbm-config-{}.tmp", uuid::Uuid::new_v4())),
-        None => PathBuf::from(format!(".dbm-config-{}.tmp", uuid::Uuid::new_v4())),
+    let config_name = path
+        .file_name()
+        .ok_or_else(|| DbmError::Configuration("configuration path must name a file".to_owned()))?;
+    let temporary_name = format!(".dbm-config-{}.tmp", uuid::Uuid::new_v4());
+    let temporary_path = project_directory.path().join(&temporary_name);
+    let _temporary = TemporaryConfig {
+        directory: project_directory.clone(),
+        name: temporary_name.clone(),
     };
-    let temporary = TemporaryConfig {
-        path: temporary_path,
-    };
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temporary.path)
-        .map_err(|error| DbmError::io(temporary.path.display(), error))?;
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    let mut file = project_directory
+        .dir()
+        .open_with(&temporary_name, &options)
+        .map_err(|error| DbmError::io(temporary_path.display(), error))?;
     file.write_all(contents.as_bytes())
-        .map_err(|error| DbmError::io(temporary.path.display(), error))?;
+        .map_err(|error| DbmError::io(temporary_path.display(), error))?;
     file.sync_all()
-        .map_err(|error| DbmError::io(temporary.path.display(), error))?;
+        .map_err(|error| DbmError::io(temporary_path.display(), error))?;
     drop(file);
-    fs::hard_link(&temporary.path, path).map_err(|error| {
-        if error.kind() == std::io::ErrorKind::AlreadyExists {
-            DbmError::Configuration(format!(
-                "refusing to overwrite existing config {}",
-                path.display()
-            ))
-        } else {
-            DbmError::io(path.display(), error)
-        }
-    })?;
+    project_directory
+        .dir()
+        .hard_link(&temporary_name, project_directory.dir(), config_name)
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::AlreadyExists {
+                DbmError::Configuration(format!(
+                    "refusing to overwrite existing config {}",
+                    path.display()
+                ))
+            } else {
+                DbmError::io(path.display(), error)
+            }
+        })?;
     Ok(())
 }
 
@@ -650,9 +709,9 @@ fn ensure_within_project(root: &Path, candidate: &Path, label: &str) -> Result<(
     Ok(())
 }
 
-fn ensure_project_directory(parent: &Path, name: &str) -> Result<PathBuf> {
-    let path = parent.join(name);
-    match fs::symlink_metadata(&path) {
+fn ensure_project_directory(parent: &ProjectDirectory, name: &str) -> Result<ProjectDirectory> {
+    let path = parent.path().join(name);
+    match parent.dir().symlink_metadata(name) {
         Ok(metadata) => {
             if metadata.file_type().is_symlink() || !metadata.is_dir() {
                 return Err(DbmError::Configuration(format!(
@@ -662,13 +721,15 @@ fn ensure_project_directory(parent: &Path, name: &str) -> Result<PathBuf> {
             }
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            match fs::create_dir(&path) {
+            match parent.dir().create_dir(name) {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
                 Err(error) => return Err(DbmError::io(path.display(), error)),
             }
-            let metadata =
-                fs::symlink_metadata(&path).map_err(|error| DbmError::io(path.display(), error))?;
+            let metadata = parent
+                .dir()
+                .symlink_metadata(name)
+                .map_err(|error| DbmError::io(path.display(), error))?;
             if metadata.file_type().is_symlink() || !metadata.is_dir() {
                 return Err(DbmError::Configuration(format!(
                     "refusing to use a symlink or non-directory project path: {}",
@@ -679,19 +740,19 @@ fn ensure_project_directory(parent: &Path, name: &str) -> Result<PathBuf> {
         Err(error) => return Err(DbmError::io(path.display(), error)),
     }
 
-    let canonical_path =
-        fs::canonicalize(&path).map_err(|error| DbmError::io(path.display(), error))?;
-    ensure_within_project(parent, &canonical_path, "project directory")?;
-    Ok(canonical_path)
+    parent
+        .open_dir(Path::new(name))
+        .map_err(|error| DbmError::io(path.display(), error))
 }
 
 struct TemporaryConfig {
-    path: PathBuf,
+    directory: ProjectDirectory,
+    name: String,
 }
 
 impl Drop for TemporaryConfig {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        let _ = self.directory.dir().remove_file(&self.name);
     }
 }
 
@@ -722,7 +783,10 @@ fn logical_path(path: &Path) -> Result<String> {
 mod tests {
     use std::fs;
 
-    use super::{Environment, initialize, load, validate_ai_endpoint};
+    use super::{
+        Environment, ProjectDirectory, ensure_project_directory, initialize, load,
+        validate_ai_endpoint,
+    };
     use crate::error::DbmError;
 
     #[test]
@@ -950,6 +1014,38 @@ mod tests {
         ));
         assert!(!outside.path().join("versioned").exists());
         assert!(!config_path.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn init_keeps_child_creation_anchored_after_parent_path_replacement() {
+        use std::os::unix::fs::symlink;
+
+        let project = tempfile::tempdir().expect("temporary project directory");
+        let outside = tempfile::tempdir().expect("outside directory");
+        let project_directory = ProjectDirectory::open_ambient(project.path())
+            .expect("open project directory capability");
+        let migrations_directory = ensure_project_directory(&project_directory, "migrations")
+            .expect("create migrations directory");
+
+        fs::rename(
+            project.path().join("migrations"),
+            project.path().join("migrations-original"),
+        )
+        .expect("move checked directory within the project");
+        symlink(outside.path(), project.path().join("migrations"))
+            .expect("replace pathname with outside symlink");
+
+        ensure_project_directory(&migrations_directory, "versioned")
+            .expect("create child through the checked directory handle");
+
+        assert!(
+            project
+                .path()
+                .join("migrations-original/versioned")
+                .is_dir()
+        );
+        assert!(!outside.path().join("versioned").exists());
     }
 
     #[cfg(unix)]

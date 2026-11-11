@@ -1567,7 +1567,9 @@ mod tests {
         upgrade_metadata_v2_to_current, upgrade_metadata_v3_to_current,
         upgrade_metadata_v4_to_current,
     };
-    use crate::config::{Environment, ExecutionConfig, LoadedConfig, SourceDir, TargetConfig};
+    use crate::config::{
+        Environment, ExecutionConfig, LoadedConfig, ProjectDirectory, SourceDir, TargetConfig,
+    };
 
     fn config(path: &std::path::Path) -> LoadedConfig {
         LoadedConfig {
@@ -1588,9 +1590,12 @@ mod tests {
             },
             source_dirs: vec![SourceDir {
                 path: path.join("migrations"),
+                relative_path: "migrations".into(),
                 logical_path: "migrations".to_owned(),
             }],
             database_path: Some(path.join("db.sqlite")),
+            project_directory: ProjectDirectory::open_ambient(path)
+                .expect("open test project directory"),
         }
     }
 

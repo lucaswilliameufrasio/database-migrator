@@ -2682,10 +2682,21 @@ fn prepare_connection_config(
 }
 
 fn all_hosts_are_local(config: &PostgresConfig) -> bool {
-    config.get_hosts().iter().all(|host| match host {
-        Host::Tcp(host) => is_loopback_name(host),
-        Host::Unix(_) => true,
-    }) && config.get_hostaddrs().iter().all(IpAddr::is_loopback)
+    config
+        .get_hosts()
+        .iter()
+        .enumerate()
+        .all(|(index, host)| match host {
+            Host::Tcp(host) => {
+                is_loopback_name(host)
+                    || config
+                        .get_hostaddrs()
+                        .get(index)
+                        .is_some_and(IpAddr::is_loopback)
+            }
+            Host::Unix(_) => true,
+        })
+        && config.get_hostaddrs().iter().all(IpAddr::is_loopback)
 }
 
 fn postgres_target_identity(config: &PostgresConfig) -> String {
@@ -2704,9 +2715,6 @@ fn postgres_target_identity(config: &PostgresConfig) -> String {
 }
 
 fn is_loopback_name(host: &str) -> bool {
-    if host.eq_ignore_ascii_case("localhost") {
-        return true;
-    }
     IpAddr::from_str(host)
         .map(|address| address.is_loopback())
         .unwrap_or(false)
@@ -3029,6 +3037,31 @@ mod tests {
 
         assert!(!use_tls);
         assert_eq!(config.get_ssl_mode(), SslMode::Disable);
+    }
+
+    #[test]
+    fn plaintext_hostname_requires_an_explicit_loopback_host_address() {
+        let unresolved = prepare_connection_config(
+            "host=localhost user=dbm dbname=app sslmode=disable",
+            true,
+            Environment::Test,
+        );
+        assert!(matches!(unresolved, Err(DbmError::Safety(_))));
+
+        let pinned_loopback = prepare_connection_config(
+            "host=localhost hostaddr=127.0.0.1 user=dbm dbname=app sslmode=disable",
+            true,
+            Environment::Test,
+        )
+        .expect("explicit loopback host address");
+        assert!(!pinned_loopback.1);
+
+        let pinned_remote = prepare_connection_config(
+            "host=localhost hostaddr=192.0.2.1 user=dbm dbname=app sslmode=disable",
+            true,
+            Environment::Test,
+        );
+        assert!(matches!(pinned_remote, Err(DbmError::Safety(_))));
     }
 
     #[test]

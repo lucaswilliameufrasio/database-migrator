@@ -46,6 +46,10 @@ incompatível ou desatualizado.
   registrado pode acessar arquivos, rede ou iniciar subprocessos por conta
   própria. A API do engine controla apenas operações feitas pelo contexto de
   migration e não promete conter efeitos externos arbitrários.
+- A CLI copia o runner selecionado para um diretório temporário privado, calcula
+  o fingerprint sobre essa cópia e inicia o mesmo arquivo, evitando a separação
+  entre hash e execução por pathname. Esse hardening não altera a decisão de que
+  o runner é código nativo confiável, não isolado (ver ADR-024).
 - API embedded chama o mesmo registry/engine explicitamente pela aplicação;
   importar ou inicializar a biblioteca nunca executa migrations.
 

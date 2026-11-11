@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tempfile::{Builder as TempDirBuilder, TempDir};
 
 use crate::async_runtime::run_blocking;
 use crate::config::LoadedConfig;
@@ -409,10 +410,11 @@ fn invoke_blocking(
     operation: RunnerOperation,
 ) -> Result<RunnerOutput> {
     let (canonical_config, project_root, runner_path) = resolve_runner_paths(config_path, config)?;
-    let runner_fingerprint = binary_fingerprint(&runner_path)?;
+    let runner_snapshot = snapshot_runner(&runner_path)?;
+    let runner_fingerprint = runner_snapshot.fingerprint.clone();
     let timeout = Duration::from_secs(config.config.execution.runner_timeout_seconds);
     let handshake_timeout = timeout.min(Duration::from_secs(HANDSHAKE_TIMEOUT_SECONDS));
-    let mut child = spawn_runner(&runner_path, &project_root, config)?;
+    let mut child = spawn_runner(&runner_snapshot.path, &project_root, config)?;
     let (sender, receiver) = mpsc::sync_channel(1);
     let stdout = child
         .stdout
@@ -628,6 +630,62 @@ fn spawn_runner(runner: &Path, project_root: &Path, config: &LoadedConfig) -> Re
 fn binary_fingerprint(path: &Path) -> Result<String> {
     let bytes = fs::read(path).map_err(|error| DbmError::io(path.display(), error))?;
     Ok(crate::identity::raw_checksum(&bytes))
+}
+
+struct RunnerSnapshot {
+    _directory: TempDir,
+    path: PathBuf,
+    fingerprint: String,
+}
+
+fn snapshot_runner(path: &Path) -> Result<RunnerSnapshot> {
+    let bytes = fs::read(path).map_err(|error| DbmError::io(path.display(), error))?;
+    let fingerprint = crate::identity::raw_checksum(&bytes);
+    let parent = path.parent().ok_or_else(|| {
+        DbmError::Configuration("configured runner path must have a parent directory".to_owned())
+    })?;
+    let mut directory_builder = TempDirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        directory_builder.permissions(fs::Permissions::from_mode(0o700));
+    }
+    let directory = directory_builder.tempdir_in(parent).map_err(|_| {
+        DbmError::Execution("could not create a private compiled runner snapshot".to_owned())
+    })?;
+    let file_name = path.file_name().ok_or_else(|| {
+        DbmError::Configuration("configured runner path must name a file".to_owned())
+    })?;
+    let snapshot_path = directory.path().join(file_name);
+    let mut snapshot = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&snapshot_path)
+        .map_err(|_| {
+            DbmError::Execution("could not create the private compiled runner snapshot".to_owned())
+        })?;
+    snapshot.write_all(&bytes).map_err(|_| {
+        DbmError::Execution("could not write the private compiled runner snapshot".to_owned())
+    })?;
+    snapshot.sync_all().map_err(|_| {
+        DbmError::Execution("could not sync the private compiled runner snapshot".to_owned())
+    })?;
+    drop(snapshot);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        fs::set_permissions(&snapshot_path, fs::Permissions::from_mode(0o700)).map_err(|_| {
+            DbmError::Execution("could not make the private runner snapshot executable".to_owned())
+        })?;
+    }
+
+    Ok(RunnerSnapshot {
+        _directory: directory,
+        path: snapshot_path,
+        fingerprint,
+    })
 }
 
 fn current_runner_fingerprint() -> Result<String> {
@@ -1124,7 +1182,7 @@ mod tests {
 
     use super::{
         ExecuteRequest, MAX_FRAME_BYTES, RUNNER_PROTOCOL_VERSION, RunnerOperation, WireAction,
-        operation_from_wire, read_frame, validate_action_shape, validate_execute,
+        operation_from_wire, read_frame, snapshot_runner, validate_action_shape, validate_execute,
     };
 
     #[test]
@@ -1150,6 +1208,42 @@ mod tests {
 
         let mut unterminated = BufReader::new(Cursor::new(b"partial".to_vec()));
         assert!(read_frame(&mut unterminated).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runner_snapshot_executes_the_hashed_bytes_after_original_path_changes() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::Command;
+
+        let test_executable = std::env::current_exe().expect("resolve test executable");
+        let executable_directory = test_executable
+            .parent()
+            .expect("test executable has a parent directory");
+        let directory = tempfile::Builder::new()
+            .prefix("dbm-runner-snapshot-test-")
+            .tempdir_in(executable_directory)
+            .expect("temporary runner project on the executable filesystem");
+        let runner_path = directory.path().join("runner.sh");
+        fs::write(&runner_path, b"#!/bin/sh\nprintf original-runner\n")
+            .expect("write harmless runner fixture");
+        fs::set_permissions(&runner_path, fs::Permissions::from_mode(0o700))
+            .expect("make original fixture executable");
+        let snapshot = snapshot_runner(&runner_path).expect("snapshot configured runner");
+
+        fs::write(&runner_path, b"#!/bin/sh\nprintf replaced-runner\n")
+            .expect("replace configured path after snapshot");
+
+        let output = Command::new(&snapshot.path)
+            .output()
+            .expect("execute snapshot, not changed original path");
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"original-runner");
+        assert_eq!(
+            snapshot.fingerprint,
+            crate::identity::raw_checksum(b"#!/bin/sh\nprintf original-runner\n")
+        );
     }
 
     #[test]

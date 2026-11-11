@@ -1,9 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self, File, OpenOptions};
+use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::config::{LoadedConfig, SourceDir};
+use cap_std::fs::{File, OpenOptions};
+
+use crate::config::{LoadedConfig, ProjectDirectory, SourceDir};
 use crate::error::{DbmError, Result};
 use crate::identity::{
     MigrationIdentity, new_version, validate_description, validate_repeatable_name,
@@ -408,7 +410,13 @@ fn create_new_at(
 ) -> Result<Vec<PathBuf>> {
     validate_version(version).map_err(|error| DbmError::Safety(error.to_string()))?;
 
+    let source_directory = config
+        .project_directory
+        .open_dir(&source.relative_path)
+        .map_err(|error| DbmError::io(source.path.display(), error))?;
     let _creation_reservation = reserve(
+        &source_directory,
+        ".dbm-create.lock",
         source.path.join(".dbm-create.lock"),
         "another dbm new command is using this source",
     )?;
@@ -422,8 +430,11 @@ fn create_new_at(
         )));
     }
 
-    let reservation_path = source.path.join(format!(".dbm-new-{version}.lock"));
+    let reservation_name = format!(".dbm-new-{version}.lock");
+    let reservation_path = source.path.join(&reservation_name);
     let reservation = reserve(
+        &source_directory,
+        &reservation_name,
         reservation_path.clone(),
         &format!("timestamp {version} is already reserved"),
     )?;
@@ -440,7 +451,8 @@ fn create_new_at(
     let prefix = format!("{version}_{description}");
     let paths = match format {
         NewFormat::Single => {
-            let path = source.path.join(format!("{prefix}.sql"));
+            let name = format!("{prefix}.sql");
+            let path = source.path.join(&name);
             let contents = format!(
                 "-- dbm:dialect {}\n\
                  -- dbm:transaction auto\n\
@@ -451,15 +463,27 @@ fn create_new_at(
                  -- Add rollback SQL here, or remove this section to mark it irreversible.\n",
                 config.config.target.driver
             );
-            create_exclusive_file(&path, contents.as_bytes())?;
+            create_exclusive_file(&source_directory, &name, &path, contents.as_bytes())?;
             vec![path]
         }
         NewFormat::Pair => {
-            let up_path = source.path.join(format!("{prefix}.up.sql"));
-            let down_path = source.path.join(format!("{prefix}.down.sql"));
-            create_exclusive_file(&up_path, b"-- Add migration SQL here.\n")?;
-            if let Err(error) = create_exclusive_file(&down_path, b"-- Add rollback SQL here.\n") {
-                let _ = fs::remove_file(&up_path);
+            let up_name = format!("{prefix}.up.sql");
+            let down_name = format!("{prefix}.down.sql");
+            let up_path = source.path.join(&up_name);
+            let down_path = source.path.join(&down_name);
+            create_exclusive_file(
+                &source_directory,
+                &up_name,
+                &up_path,
+                b"-- Add migration SQL here.\n",
+            )?;
+            if let Err(error) = create_exclusive_file(
+                &source_directory,
+                &down_name,
+                &down_path,
+                b"-- Add rollback SQL here.\n",
+            ) {
+                let _ = source_directory.dir().remove_file(&up_name);
                 return Err(error);
             }
             vec![up_path, down_path]
@@ -470,23 +494,28 @@ fn create_new_at(
     Ok(paths)
 }
 
-fn reserve(path: PathBuf, reason: &str) -> Result<Reservation> {
-    let file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)
+fn reserve(
+    directory: &ProjectDirectory,
+    name: &str,
+    display_path: PathBuf,
+    reason: &str,
+) -> Result<Reservation> {
+    let file = directory
+        .dir()
+        .open_with(name, OpenOptions::new().write(true).create_new(true))
         .map_err(|error| {
             if error.kind() == std::io::ErrorKind::AlreadyExists {
                 DbmError::Safety(format!(
                     "{reason}; inspect stale reservation {} before removing it",
-                    path.display()
+                    display_path.display()
                 ))
             } else {
-                DbmError::io(path.display(), error)
+                DbmError::io(display_path.display(), error)
             }
         })?;
     Ok(Reservation {
-        path,
+        directory: directory.clone(),
+        name: name.to_owned(),
         file: Some(file),
     })
 }
@@ -641,16 +670,22 @@ fn logical_file_path(source: &SourceDir, name: &str) -> String {
     }
 }
 
-fn create_exclusive_file(path: &Path, contents: &[u8]) -> Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
+fn create_exclusive_file(
+    directory: &ProjectDirectory,
+    name: &str,
+    path: &Path,
+    contents: &[u8],
+) -> Result<()> {
+    let mut file = directory
+        .dir()
+        .open_with(name, OpenOptions::new().write(true).create_new(true))
         .map_err(|error| DbmError::io(path.display(), error))?;
 
     if let Err(error) = file.write_all(contents).and_then(|()| file.sync_all()) {
         drop(file);
-        let _ = fs::remove_file(path);
+        if let Some(file_name) = path.file_name() {
+            let _ = directory.dir().remove_file(file_name);
+        }
         return Err(DbmError::io(path.display(), error));
     }
 
@@ -658,14 +693,15 @@ fn create_exclusive_file(path: &Path, contents: &[u8]) -> Result<()> {
 }
 
 struct Reservation {
-    path: PathBuf,
+    directory: ProjectDirectory,
+    name: String,
     file: Option<File>,
 }
 
 impl Drop for Reservation {
     fn drop(&mut self) {
         self.file.take();
-        let _ = fs::remove_file(&self.path);
+        let _ = self.directory.dir().remove_file(&self.name);
     }
 }
 
@@ -674,7 +710,7 @@ mod tests {
     use std::fs;
 
     use super::{NewFormat, create_new_at, discover, reserve};
-    use crate::config::{LoadedConfig, SourceDir};
+    use crate::config::{LoadedConfig, ProjectDirectory, SourceDir};
     use crate::migration::MigrationFormat;
 
     fn test_config(root: &std::path::Path) -> LoadedConfig {
@@ -698,9 +734,12 @@ mod tests {
             },
             source_dirs: vec![SourceDir {
                 path: source_path,
+                relative_path: "migrations".into(),
                 logical_path: "migrations".to_owned(),
             }],
             database_path: Some(root.join("db.sqlite")),
+            project_directory: ProjectDirectory::open_ambient(root)
+                .expect("open test project directory"),
         }
     }
 
@@ -741,6 +780,7 @@ mod tests {
         fs::create_dir_all(&second_source).expect("create second migration source");
         config.source_dirs.push(super::SourceDir {
             path: second_source.clone(),
+            relative_path: "migrations/second".into(),
             logical_path: "migrations/second".to_owned(),
         });
 
@@ -1017,7 +1057,13 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary directory");
         let config = test_config(directory.path());
         let source = &config.source_dirs[0];
+        let source_directory = config
+            .project_directory
+            .open_dir(&source.relative_path)
+            .expect("open migration source capability");
         let lock = reserve(
+            &source_directory,
+            ".dbm-create.lock",
             source.path.join(".dbm-create.lock"),
             "test creator owns source lock",
         )
@@ -1043,6 +1089,52 @@ mod tests {
                 "20261021162643981234"
             )
             .is_ok()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn new_does_not_write_through_a_replaced_source_ancestor() {
+        use std::os::unix::fs::symlink;
+
+        let project = tempfile::tempdir().expect("temporary project directory");
+        let outside = tempfile::tempdir().expect("outside directory");
+        let mut config = test_config(project.path());
+        let original_source = project.path().join("migrations");
+        fs::create_dir(original_source.join("versioned")).expect("create nested migration source");
+        fs::create_dir(outside.path().join("versioned"))
+            .expect("create outside source-shaped directory");
+        let source = &mut config.source_dirs[0];
+        source.path = original_source.join("versioned");
+        source.relative_path = "migrations/versioned".into();
+        source.logical_path = "migrations/versioned".to_owned();
+        config.config.source = vec![source.relative_path.clone()];
+
+        fs::rename(&original_source, project.path().join("migrations-original"))
+            .expect("move checked source ancestor within project");
+        symlink(outside.path(), &original_source).expect("replace source ancestor with symlink");
+
+        let error = create_new_at(
+            &config,
+            &config.source_dirs[0],
+            "create_users",
+            NewFormat::Single,
+            "20261021162643981234",
+        )
+        .expect_err("source traversal outside the project must fail closed");
+
+        assert!(error.to_string().contains("migrations/versioned"));
+        assert_eq!(
+            fs::read_dir(outside.path().join("versioned"))
+                .unwrap()
+                .count(),
+            0
+        );
+        assert_eq!(
+            fs::read_dir(project.path().join("migrations-original/versioned"))
+                .unwrap()
+                .count(),
+            0
         );
     }
 
