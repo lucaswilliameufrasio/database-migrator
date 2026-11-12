@@ -664,3 +664,89 @@ non-failing. This does not complete the 12-scenario adapter/version matrix or
 resolve the inaccessible external security report and four uncorroborated
 `needs_validation` references. G11 remains partial; no absence-of-critical-issues
 claim is made.
+
+**Current-tree report and supply-chain reconciliation — 2026-11-11:** the
+external source-first audit at
+`/home/mimiron/security-audit-skill/database-migrator/run-1/REPORT.md` is now
+available for baseline `3822695f15d5dbcbdc38872fb349b640ab2844dd`; its checksums
+verified. The pinned findings and coverage-ledger validators passed in a
+rootless, network-disabled sandbox: 7 findings and 18 coverage units. The report
+remains tied to its baseline; the four `needs_validation` records were not
+reclassified. Their bounded local mitigations are separately recorded for
+`4cca4dc5c330fb6700771c26578304f52deb3ea3` in the external
+`REMEDIATION-VALIDATION.md`. The report's confirmed low-impact PostgreSQL
+Unicode-escaped-identifier finding remains part of the historical baseline; a
+separate follow-up mitigation and its verification are recorded below.
+
+The pinned supply-chain tools (`cargo-audit 0.22.2`, `cargo-deny 0.20.2`, and
+`cargo-cyclonedx 0.5.9`) were built from the local Cargo cache and run in a
+rootless, network-disabled sandbox. Root and fuzz `cargo audit --no-fetch`
+passed with 1,422 loaded advisories and 311/260 locked packages; root and fuzz
+`cargo deny --offline --all-features --locked check` passed advisories, bans,
+licenses, and sources. Non-failing duplicate-version and unused-license
+allowance warnings remain. The CycloneDX 1.3 application SBOM validated with
+253 components (SHA-256
+`d36092a7f818e51a0f27f733338c28bd5e2c64fd528a04b34f6cac1c5355491a`). The
+advisory snapshot was commit `7a40350e1b8ba5b656d909f88222a8059a83d88d`
+(`2026-11-08T16:03:42-07:00`; local fetch marker 2026-11-09), so this offline
+result does not establish that RustSec data was current on 2026-11-11.
+
+The locked fuzz graph initially failed `cargo deny`: the root manifest change in
+`4cca4dc5c330fb6700771c26578304f52deb3ea3` made `cap-std` and `tempfile` non-optional, but
+`fuzz/Cargo.lock` had not been regenerated. Cargo metadata identified 16 missing
+locked packages. The lock is now updated locally; its post-update hash matches
+the offline generated lock, and the locked fuzz audit and deny checks pass.
+`cargo check --manifest-path fuzz/Cargo.toml --all-features --locked --offline
+--bins` also compiled both fuzz targets with the updated graph. The 2026-11-07
+campaigns predate the PostgreSQL identifier-guard change and do not cover it.
+The current `sql_scanner` harness now calls both PostgreSQL migration validators
+and includes a seed for the escaped metadata identifier. The root quality gate
+passed, and both fuzz campaigns completed in an isolated sandbox; evidence is
+recorded in the following dated follow-up. The lock change is included in this
+follow-up. This evidence does not close the recovery matrix or G11, and no
+absence-of-critical-issues claim is made.
+
+**PostgreSQL Unicode-escaped-identifier follow-up — 2026-11-11:**
+ADR-025 records the decision to reject `U&"..."` identifiers, including
+`UESCAPE` forms, while allowing literal-Unicode identifiers such as `"café"`
+and Unicode-escaped string literals. The `sql_scanner` fuzz harness now directly
+invokes both PostgreSQL migration validators, and its corpus includes a seed
+that spells the protected metadata table with a Unicode escape.
+
+The implementation passed `cargo fmt --all -- --check`, formatting for
+the separate fuzz package, the focused PostgreSQL guard regression,
+`cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`,
+`cargo test --workspace --all-features --locked` (155 passed, 49 ignored, zero
+failures), `cargo build --workspace --all-features --locked`, and both
+documented SQLite examples. Logs and their SHA-256 records are under
+`/mnt/storage/projects/.scratch/dbm-g11-validation-20261111/attempt-07/`.
+The sandbox used rootless Docker image
+`dbm-fuzz-tools:20261029` (image ID
+`sha256:2e21d3923dc9f005d3eb528f9dde2651da3618ea6467ac008c3450aa4ebab705`),
+network mode `none`, a read-only root and source/toolchain mounts, dropped
+capabilities, `no-new-privileges`, 2 CPUs, 4 GiB memory, and bounded tmpfs
+scratch. The first suite attempt had a 64 MiB temporary filesystem and four
+runner-protocol fixture copies failed with `StorageFull`; the corrected 512 MiB
+temporary filesystem run passed all five runner-protocol tests. No PostgreSQL
+integration or shared database service was used; the changed guard is directly
+covered by its unit regression.
+
+The first instrumented fuzz build was OOM-killed at the 4 GiB limit while Cargo
+used two build jobs; no target ran in that attempt. Docker recorded an OOM event.
+A fresh sandbox retry used one Cargo build job and succeeded. The container
+reported a 3,353,853,952-byte memory peak and zero `oom`/`oom_kill` events. Both
+targets then completed their bounded campaigns, and their generated corpora
+were retained under
+`/mnt/storage/projects/.scratch/dbm-g11-validation-20261111/attempt-08/`:
+
+| Target | Runtime / executions | Peak RSS | Retained corpus | Aggregate SHA-256 | Crash artifacts |
+|---|---:|---:|---:|---|---:|
+| `sql_scanner` | 301 s / 1,902,652 | 561 MiB | 1,424 files / 159,518 bytes | `c69c871c58b97e725b62d476151102b390f05ba0ad20de03f524f09f18307fcb` | 0 |
+| `migration_parser` | 301 s / 2,601,269 | 587 MiB | 1,492 files / 187,838 bytes | `11f228d28aa8878899989e5546dfecbb580c71c7e8f92b03df4855ace9181249` | 0 |
+
+The campaigns used cargo-fuzz 0.13.2, rustc/cargo 1.101.0-nightly
+(`41089d07a0a2`, LLVM 23.1.4), and Debian Clang 14.0.6. Full per-input hashes,
+logs, results, and sandbox controls are retained beside the corpora. These are
+bounded fuzz results, not proof of parser correctness. No PostgreSQL integration
+or shared/real database service was used. The result does not close the recovery
+matrix or G11, and no absence-of-critical-issues claim is made.

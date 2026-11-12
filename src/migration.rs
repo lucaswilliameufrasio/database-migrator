@@ -159,7 +159,7 @@ pub(crate) fn validate_mysql_migration_statement(sql: &str) -> Result<()> {
 }
 
 pub(crate) fn validate_postgres_migration_statement(sql: &str) -> Result<()> {
-    let tokens = postgres_identifier_tokens(sql);
+    let tokens = postgres_identifier_tokens(sql)?;
     let Some(first) = tokens.first().map(|token| token.value.as_str()) else {
         return Err(DbmError::Safety(
             "PostgreSQL migration step contains no SQL command".to_owned(),
@@ -258,7 +258,7 @@ pub(crate) fn parse_postgres_nontransactional_index_operation(
     sql: &str,
 ) -> Result<PostgresNonTransactionalIndexOperation> {
     validate_postgres_migration_statement(sql)?;
-    let tokens = postgres_identifier_tokens(sql);
+    let tokens = postgres_identifier_tokens(sql)?;
     let token_values: Vec<&str> = tokens.iter().map(|token| token.value.as_str()).collect();
     let unsupported = || {
         DbmError::Safety(
@@ -360,7 +360,7 @@ struct PostgresIdentifierToken {
     end: usize,
 }
 
-fn postgres_identifier_tokens(sql: &str) -> Vec<PostgresIdentifierToken> {
+fn postgres_identifier_tokens(sql: &str) -> Result<Vec<PostgresIdentifierToken>> {
     let bytes = sql.as_bytes();
     let mut tokens = Vec::new();
     let mut lexer = PostgresLexer::default();
@@ -397,6 +397,16 @@ fn postgres_identifier_tokens(sql: &str) -> Vec<PostgresIdentifierToken> {
             continue;
         }
 
+        if matches!(bytes[index], b'u' | b'U')
+            && bytes.get(index + 1) == Some(&b'&')
+            && bytes.get(index + 2) == Some(&b'"')
+        {
+            return Err(DbmError::Safety(
+                "PostgreSQL Unicode-escaped identifiers (U&\"...\") are not supported in migrations because escapes can conceal protected metadata table names from safety checks; write Unicode characters literally"
+                    .to_owned(),
+            ));
+        }
+
         if is_postgres_identifier_start(bytes[index]) {
             let start = index;
             index += 1;
@@ -416,7 +426,7 @@ fn postgres_identifier_tokens(sql: &str) -> Vec<PostgresIdentifierToken> {
         lexer.advance(bytes, &mut index);
     }
 
-    tokens
+    Ok(tokens)
 }
 
 fn has_dot_after_identifier(sql: &str, token: &PostgresIdentifierToken) -> bool {
@@ -1878,6 +1888,42 @@ SELECT $tag$quoted; /* body */$tag$;
             assert!(
                 validate_postgres_migration_statement(sql).is_ok(),
                 "expected literals/comments not to trigger the guard for {sql:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn postgres_guard_rejects_unicode_escaped_identifiers_but_allows_literal_unicode() {
+        for sql in [
+            r#"CREATE TABLE U&"caf\00E9" (id integer)"#,
+            r#"UPDATE U&"\0073chema_migration_locks" SET state = 'released'"#,
+            r#"SELECT u&"caf!00E9" UESCAPE '!'"#,
+        ] {
+            let error = validate_postgres_migration_statement(sql)
+                .expect_err("Unicode-escaped identifiers must fail closed");
+            assert!(
+                error.to_string().contains("Unicode-escaped identifiers"),
+                "expected a clear unsupported-syntax reason for {sql:?}, got {error}"
+            );
+        }
+
+        assert!(
+            validate_postgres_nontransactional_statement(
+                r#"CREATE INDEX CONCURRENTLY U&"name\00E9" ON users (email)"#
+            )
+            .is_err(),
+            "the non-transactional PostgreSQL path must reject the same syntax"
+        );
+
+        for sql in [
+            "CREATE TABLE \"café\" (id integer)",
+            "CREATE TABLE app_data (name text DEFAULT U&'caf\\00E9')",
+            "-- U&\"schema_migration_locks\"\nCREATE TABLE \"café\" (id integer)",
+            "CREATE TABLE \"U&schema_migration_locks\" (id integer)",
+        ] {
+            assert!(
+                validate_postgres_migration_statement(sql).is_ok(),
+                "literal Unicode identifiers and ignored text remain supported: {sql:?}"
             );
         }
     }

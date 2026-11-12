@@ -49,6 +49,8 @@ pub mod fuzzing {
         for dialect in [SqlDialect::Sqlite, SqlDialect::Postgres, SqlDialect::Mysql] {
             let _ = split_sql_statements_for_dialect(&sql, dialect);
         }
+        let _ = crate::migration::validate_postgres_migration_statement(&sql);
+        let _ = crate::migration::validate_postgres_nontransactional_statement(&sql);
     }
 
     pub fn exercise_parsers(input: &[u8]) {

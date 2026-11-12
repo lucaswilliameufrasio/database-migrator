@@ -100,6 +100,10 @@ the PostgreSQL catalog for index validity, schema, table, columns, uniqueness,
 and default index options; it refuses to infer the result from the applied
 migration row alone. Transaction-pooling PgBouncer connections are rejected
 when the backend changes. An uncertain result is never retried automatically.
+PostgreSQL migrations reject Unicode-escaped quoted identifiers (`U&"..."`,
+including `UESCAPE` variants) because they can conceal protected metadata-table
+names from the safety checks. Use literal UTF-8 identifiers instead: `"café"`
+is allowed. Unicode-escaped string literals such as `U&'...'` remain supported.
 
 MySQL and MariaDB use `driver = "mysql"`, the `mysql` migration dialect, and a
 database selected in the connection URL. Every migration must explicitly set
