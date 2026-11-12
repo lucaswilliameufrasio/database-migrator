@@ -826,7 +826,7 @@ fn sqlite_worker(
                             .to_owned(),
                     ))
                 } else {
-                    match connection.as_ref() {
+                    match connection.as_mut() {
                         Some(connection) => execute_managed_sql(connection, &sql),
                         None => Err(worker_closed_error()),
                     }
@@ -909,7 +909,7 @@ where
     operation(connection)
 }
 
-fn execute_managed_sql(connection: &Connection, sql: &str) -> Result<()> {
+fn execute_managed_sql(connection: &mut Connection, sql: &str) -> Result<()> {
     connection.authorizer(Some(|context: rusqlite::hooks::AuthContext<'_>| {
         if forbidden_action(context.action) {
             Authorization::Deny

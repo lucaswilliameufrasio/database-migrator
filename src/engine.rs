@@ -1,5 +1,8 @@
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
+use std::ops::Deref;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use rusqlite::hooks::{AuthAction, Authorization};
@@ -4304,7 +4307,7 @@ fn revert_one(
 }
 
 fn execute_one_in_transaction(
-    transaction: &Transaction<'_>,
+    transaction: &GuardedSqliteTransaction<'_>,
     execution: StepExecution<'_>,
     steps: &mut Vec<StepAttempt>,
 ) -> Result<()> {
@@ -4538,20 +4541,9 @@ fn sqlite_error_code(error: &rusqlite::Error) -> String {
     }
 }
 
-fn execute_guarded(transaction: &Transaction<'_>, sql: &str) -> rusqlite::Result<()> {
-    transaction.authorizer(Some(|context: rusqlite::hooks::AuthContext<'_>| {
-        if forbidden_action(context.action) {
-            Authorization::Deny
-        } else {
-            Authorization::Allow
-        }
-    }))?;
-    let result = transaction.execute_batch(sql);
-    let clear_result = transaction.authorizer(Some(|_: rusqlite::hooks::AuthContext<'_>| {
-        Authorization::Allow
-    }));
-    clear_result?;
-    result
+fn execute_guarded(transaction: &GuardedSqliteTransaction<'_>, sql: &str) -> rusqlite::Result<()> {
+    let _activation = SqliteAuthorizerActivation::new(&transaction.authorizer_active);
+    transaction.execute_batch(sql)
 }
 
 fn forbidden_action(action: AuthAction<'_>) -> bool {
@@ -4593,8 +4585,58 @@ fn is_metadata_table(table_name: &str) -> bool {
     .any(|name| table_name.eq_ignore_ascii_case(name))
 }
 
-fn begin_immediate(connection: &mut Connection) -> Result<Transaction<'_>> {
-    connection
+struct GuardedSqliteTransaction<'connection> {
+    transaction: Transaction<'connection>,
+    authorizer_active: Arc<AtomicBool>,
+}
+
+impl<'connection> GuardedSqliteTransaction<'connection> {
+    fn commit(self) -> rusqlite::Result<()> {
+        self.transaction.commit()
+    }
+
+    fn rollback(self) -> rusqlite::Result<()> {
+        self.transaction.rollback()
+    }
+}
+
+impl<'connection> Deref for GuardedSqliteTransaction<'connection> {
+    type Target = Transaction<'connection>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.transaction
+    }
+}
+
+struct SqliteAuthorizerActivation<'state> {
+    active: &'state AtomicBool,
+}
+
+impl<'state> SqliteAuthorizerActivation<'state> {
+    fn new(active: &'state AtomicBool) -> Self {
+        active.store(true, Ordering::SeqCst);
+        Self { active }
+    }
+}
+
+impl Drop for SqliteAuthorizerActivation<'_> {
+    fn drop(&mut self) {
+        self.active.store(false, Ordering::SeqCst);
+    }
+}
+
+fn begin_immediate(connection: &mut Connection) -> Result<GuardedSqliteTransaction<'_>> {
+    let authorizer_active = Arc::new(AtomicBool::new(false));
+    let callback_state = Arc::clone(&authorizer_active);
+    connection.authorizer(Some(move |context: rusqlite::hooks::AuthContext<'_>| {
+        if callback_state.load(Ordering::SeqCst) && forbidden_action(context.action) {
+            Authorization::Deny
+        } else {
+            Authorization::Allow
+        }
+    }))?;
+
+    let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|error| match error {
             rusqlite::Error::SqliteFailure(failure, _) => match failure.code {
@@ -4604,7 +4646,12 @@ fn begin_immediate(connection: &mut Connection) -> Result<Transaction<'_>> {
                 _ => DbmError::Database(rusqlite::Error::SqliteFailure(failure, None)),
             },
             other => DbmError::Database(other),
-        })
+        })?;
+
+    Ok(GuardedSqliteTransaction {
+        transaction,
+        authorizer_active,
+    })
 }
 
 pub(crate) fn require_mutation_environment(config: &LoadedConfig) -> Result<()> {
