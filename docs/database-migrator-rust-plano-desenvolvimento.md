@@ -1819,6 +1819,19 @@ nos três alvos; o `plan` do SQLite não criou o arquivo. Os containers
 precisa de `--bin dbm` porque o pacote também declara `dbm-test-runner`; o
 README principal foi ajustado nisso. G11 e G12 continuam abertos.
 
+**Harness SQLite #11 — 2026-11-13:** o job de qualidade da CI
+`43370304481`, no commit `192c3dd`, falhou em
+`sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved`. O
+teste viu o run `started` e o journal, mas não viu o rollback em 45 segundos;
+stdout e stderr vazios. O supply-chain passou e performance não rodou. O
+harness agora guarda a identidade do primeiro journal e trata um arquivo
+substituído como rollback, mesmo quando a remoção e a recriação cabem entre
+duas leituras. A CTE da migration de teste passou de 1 milhão para 100 mil
+linhas; o trigger de 100 milhões no update `failed` permanece. Seis execuções
+focadas locais passaram, cada uma em cerca de 0,16 s, e o gate local completo
+passou (160 passed, 49 ignored; formatação, Clippy e build). Isso não fecha
+G11. A CI remota desta correção ainda não foi observada.
+
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 
 **G12** — Tag estável com release notes, checksums assinados quando possível, binários homologados, changelog, upgrade guide, compatibilidade semver, matriz de testes publicada e exemplos de CI de deploy seguros.

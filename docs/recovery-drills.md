@@ -167,6 +167,21 @@ quality/tests/build/examples, dependency audit/SBOM, and informational
 performance. This verifies the corrected #11 harness on that SHA. It does not
 close G11's separate security-review or fault-matrix requirements.
 
+**SQLite #11 journal-identity follow-up — 2026-11-13:** quality run
+[43370304481](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/43370304481)
+on `192c3ddd527d3e1d7f8220fd28ca847ef70df022` failed the same test with
+`started=true`, migration journal observed, and rollback not observed within 45
+seconds. Stdout and stderr were empty, so this is again a missed observation
+window, not evidence that migration data committed. Supply-chain passed;
+performance did not run. The harness now records the identity of the first
+rollback journal and treats a replaced file as rollback even when the delete
+and recreate fall between polls. The migration fixture's recursive read was
+reduced from 1,000,000 rows to 100,000 so that transaction still ends inside
+the deadline on a slow runner. The 100,000,000-iteration failed-run trigger is
+unchanged. Six consecutive focused local runs passed, each in about 0.16
+seconds, and the full local gate passed afterward (160 passed, 49 ignored).
+Remote CI for this correction is not claimed yet. G11 remains open.
+
 **Supplemental complete opt-in suite on PostgreSQL 17.11 — 2026-11-08:** the
 45-test ignored workspace selection passed against disposable PostgreSQL 17.11,
 MySQL 8.4.13, and MariaDB 11.8.9 instances. Counts were 16 library, 23 CLI, 3

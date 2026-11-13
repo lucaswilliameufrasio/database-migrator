@@ -4282,6 +4282,20 @@ fn killing_cli_during_a_transaction_keeps_the_next_write_blocked() {
     );
 }
 
+fn sqlite_journal_identity(path: &Path) -> Option<(u64, u64)> {
+    let metadata = fs::metadata(path).ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some((metadata.dev(), metadata.ino()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+        Some((0, 1))
+    }
+}
+
 #[test]
 fn sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved() {
     let directory = tempfile::tempdir().expect("temporary rollback-crash project");
@@ -4338,7 +4352,7 @@ fn sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved() {
             .path()
             .join(format!("migrations/versioned/{migration_version}_rollback_crash.sql")),
         format!(
-            "-- dbm:dialect sqlite\n-- dbm:transaction auto\n-- dbm:up\nCREATE TABLE {effect_table} (id INTEGER PRIMARY KEY);\nWITH RECURSIVE sequence(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 1000000) SELECT sum(value) FROM sequence;\nSELECT * FROM deliberately_missing_rollback_crash_table;\n-- dbm:down\nDROP TABLE {effect_table};\n"
+            "-- dbm:dialect sqlite\n-- dbm:transaction auto\n-- dbm:up\nCREATE TABLE {effect_table} (id INTEGER PRIMARY KEY);\nWITH RECURSIVE sequence(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 100000) SELECT sum(value) FROM sequence;\nSELECT * FROM deliberately_missing_rollback_crash_table;\n-- dbm:down\nDROP TABLE {effect_table};\n"
         ),
     )
     .expect("write transactional migration that fails after earlier DDL");
@@ -4358,6 +4372,7 @@ fn sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved() {
     let deadline = Instant::now() + Duration::from_secs(45);
     let mut durable_started_run = false;
     let mut migration_journal_seen = false;
+    let mut migration_journal_identity = None;
     let mut rollback_seen = false;
     let mut failed_run_persistence_observed = false;
     let mut failed_run_commit_blocker = None;
@@ -4388,11 +4403,15 @@ fn sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved() {
         }
 
         if durable_started_run {
-            if journal_path.exists() {
-                migration_journal_seen = true;
-            } else if migration_journal_seen {
+            let journal_identity = sqlite_journal_identity(&journal_path);
+            if migration_journal_identity.is_none() {
+                if journal_identity.is_some() {
+                    migration_journal_identity = journal_identity;
+                    migration_journal_seen = true;
+                }
+            } else if journal_identity != migration_journal_identity {
                 rollback_seen = true;
-                if failed_run_commit_blocker.is_none() {
+                if journal_identity.is_none() && failed_run_commit_blocker.is_none() {
                     let blocker = rusqlite::Connection::open(&database_path)
                         .expect("open SQLite rollback observer");
                     blocker
@@ -4406,7 +4425,7 @@ fn sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved() {
                     failed_run_commit_blocker = Some(blocker);
                 }
             }
-            if rollback_seen && journal_path.exists() {
+            if rollback_seen && journal_identity.is_some() {
                 failed_run_persistence_observed = true;
                 break;
             }
