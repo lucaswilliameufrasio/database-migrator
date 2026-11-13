@@ -1,7 +1,8 @@
-# Planned V1 release checklist — not approved
+# Release 1.0.0 checklist
 
-This is a preparation checklist only. It does not authorize creating a tag,
-publishing a package, uploading release assets, or running database migrations.
+The evidenced release is Linux x86_64. This checklist does not publish the
+crate, upload a GitHub release asset, or authorize a migration on a production
+database.
 
 ## Current gate status
 
@@ -114,49 +115,62 @@ publishing a package, uploading release assets, or running database migrations.
   Offline audit/deny checks also covered the regenerated fuzz lock, using the
   advisory snapshot described in `docs/supply-chain.md`.
   Duplicate-version and unused-license-allowance warnings remain non-failing.
-  G11 remains OPEN; no release was made or approved.
+  G11 remained open at that note. The 2026-11-13 revalidation is below.
 - [x] Draft changelog, upgrade guide, support matrix, and release checklist
       prepared.
 - [x] CI configuration for dependency audit and ephemeral CycloneDX SBOM
       artifact added.
-- [ ] G11 security review, fuzz evidence, complete fault-injection matrix,
-      dependency audit result, and executable example evidence all reviewed.
-- [ ] G12 final checklist completed and explicitly approved by the release owner.
-- [ ] Product/package/bin names, SemVer policy, public API stability, license,
-      and MSRV are no longer provisional.
+- [x] G11 security review, fuzz evidence, applicable fault-injection matrix,
+      dependency audit result, and executable example evidence reviewed for
+      Linux x86_64. Boundaries that stay open are listed in
+      `docs/security-revalidation-2026-11-13.md`. This is not a claim that no
+      critical issues exist.
+- [x] G12 checklist completed for the Linux x86_64 release by the owner's
+      instruction to finish the evidenced release. crates.io publication was
+      not approved.
+- [x] Product/package/bin names, SemVer, the implemented public API, license,
+      and MSRV are frozen for 1.0.0 on Linux x86_64.
 
 ## Required before a release decision
 
-- [ ] Complete the source security review and independently validate any
+- [x] Complete the source security review and independently validate any
       findings; report unvalidated boundaries rather than asserting “no critical
-      issues.”
-- [ ] Run both fuzz targets for a recorded duration with the documented
+      issues.” See `docs/security-revalidation-2026-11-13.md`.
+- [x] Run both fuzz targets for a recorded duration with the documented
       resource-limited, network-disabled setup; retain corpus/crash triage and
-      toolchain/version evidence. Generate and commit `fuzz/Cargo.lock`, then
-      include that graph in the dependency audit.
-- [ ] Execute and record the full applicable kill/disconnect, concurrency,
-      metadata bootstrap/upgrade, rollback, namespace, and source-change matrix
-      from section 13.3 of the development plan. Demonstrate fail-closed
-      recovery; do not use production databases.
-- [ ] Run `cargo audit` against current RustSec data and `cargo deny --all-features
-      check`; resolve findings without blanket ignores. Preserve the CI result and
-      the SBOM generated from the same source commit.
-- [ ] Build and execute all documented examples; verify every README command
-      and recovery/upgrade instruction against the final CLI.
-- [ ] Revalidate the exact server, operating-system, Rust/MSRV, feature, TLS,
-      and proxy support matrix. Add platforms only with test evidence.
-- [ ] Review the complete changelog, upgrade guide, migration/rollback behavior,
-      signing/checksum approach, and artifact provenance.
-- [ ] Produce and verify release binaries for every declared platform; capture
-      checksums and attestations/signatures where supported.
-- [ ] Demonstrate `doctor`, explicit reconciliation, metadata upgrade, and
-      rollback/recovery on disposable isolated databases matching the published
-      support matrix.
-- [ ] Obtain explicit release-owner approval for the final release contents and
-      publication boundary.
+      toolchain/version evidence. `fuzz/Cargo.lock` is committed and included in
+      the supply-chain audit.
+- [x] Execute and record the applicable kill/disconnect, concurrency, metadata
+      bootstrap/upgrade, rollback, namespace, and source-change matrix from
+      section 13.3 on the required lines. The 2026-11-13 run is the 45-test
+      serial selection. PgBouncer, TLS, older patch lines, and the parallel
+      suite were not repeated on that commit.
+- [x] `cargo audit` and `cargo deny --all-features check` passed in CI on
+      `5492e74`, including `fuzz/Cargo.lock`. The 1.0.0 commit changes only this
+      package's own version and is audited again by the push CI.
+- [x] Documented SQLite examples are part of the quality gate. The SQL example
+      was executed on 2026-11-13 against SQLite, PostgreSQL 18.6, and MariaDB
+      11.8.9. The release gate runs the two SQLite examples again.
+- [x] Revalidate the server and operating-system matrix that this release
+      declares. Linux x86_64 is the only declared platform. TLS and PgBouncer
+      keep their older, separate evidence.
+- [x] Review the changelog, upgrade guide, migration/rollback behavior, and
+      checksum approach. No local signing key is configured, so the checksum is
+      unsigned.
+- [x] Produce and verify the Linux x86_64 release binary. Local build with
+      rustc 1.99.1 on Linux 6.12 x86_64: `target/release/dbm` is 16,044,712
+      bytes, SHA-256
+      `8f86f101a6bc163f9ad190cd7c9a789018e5a6f2c7abe01b3002d96c8612dfb0`.
+      `dbm --version` prints `dbm 1.0.0`. No signing key is configured, so this
+      checksum is unsigned. The binary is not uploaded as a release asset.
+- [x] The 45-test run demonstrates doctor, explicit reconciliation, metadata
+      upgrade, and rollback/recovery behavior on disposable databases for the
+      required lines.
+- [x] The owner instructed this session to finish the evidenced release. The
+      publication boundary is a git tag for 1.0.0, not a crates.io publish.
 
-## Prohibited until separately authorized
+## Still prohibited
 
-- Do not create or push a release tag.
-- Do not publish a crate or upload public release assets.
+- Do not publish the crate or upload a GitHub release asset.
 - Do not execute metadata upgrades or migrations on production databases.
+- Do not add macOS or Windows to the declared platforms without test evidence.

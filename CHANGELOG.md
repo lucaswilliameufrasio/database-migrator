@@ -1,16 +1,20 @@
 # Changelog
 
-All notable changes to this project will be documented here. This file is a
-draft for the planned V1; no stable release has been published.
+All notable changes to this project are documented here.
 
 ## Unreleased
+
+## 1.0.0 — 2026-11-13
+
+This release freezes the implemented Rust API and metadata format 5 for Linux
+x86_64. It does not publish the crate and does not claim macOS or Windows.
 
 ### Fixed
 
 - Production `up` and `down` check the write session's target fingerprint again
   before the first metadata mutation. Creating a missing SQLite file still
   matches an `uninitialized` approval when the path, schema, and database are
-  unchanged. This does not close G11 or G12.
+  unchanged.
 
 ### Changed
 
@@ -19,8 +23,13 @@ draft for the planned V1; no stable release has been published.
   `dbm plan --down --steps N` prints the rollback approval hash. Development
   and test targets stay unchanged and reject those flags. Reconciliation,
   metadata upgrade, and legacy apply/adopt keep their existing approvals and
-  also require `--approve-target` in production. This does not close G11 or
-  G12 and does not authorize a tag or publication.
+  also require `--approve-target` in production.
+- Package `database-migrator`, binary `dbm`, MSRV 1.89, and license
+  `MIT OR Apache-2.0` are no longer provisional. The declared platform is
+  Linux x86_64.
+- The local release binary built with rustc 1.99.1 is SHA-256
+  `8f86f101a6bc163f9ad190cd7c9a789018e5a6f2c7abe01b3002d96c8612dfb0`
+  (16,044,712 bytes). It is unsigned because no signing key is configured.
 
 ### Added
 

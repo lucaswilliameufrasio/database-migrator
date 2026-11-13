@@ -1,7 +1,7 @@
 # ADR-012: Toolchain, MSRV e licença da V0
 
-- **Status:** Aceita para início da implementação; reavaliar antes de publicar
-- **Data:** 2026-10-23
+- **Status:** Aceita para o release 1.0.0 em Linux x86_64; publicação no crates.io continua separada
+- **Data:** 2026-10-23; reavaliada em 2026-11-13
 
 ## Contexto
 
@@ -19,6 +19,22 @@ Rust 1.99.1 foi a stable publicada mais recente verificada para esta decisão.
   revisão antes de publicação.
 - Nome do binário `dbm` e nome do package permanecem provisórios; nenhum
   package será publicado nesta fatia.
+
+## Reavaliação — 2026-11-13
+
+A reavaliação exigida antes de um release confirma o que esta ADR já tinha
+escolhido, no escopo que a evidência cobre:
+
+- O package permanece `database-migrator`. O nome estava livre no crates.io
+  nessa data. Este release não publica o crate.
+- O binário permanece `dbm`.
+- A MSRV permanece 1.89. A toolchain de desenvolvimento e CI permanece 1.99.1.
+- A licença permanece `MIT OR Apache-2.0`.
+- O formato de metadata mutável permanece 5.
+- A plataforma declarada do release 1.0.0 é Linux x86_64. macOS e Windows não
+  entram nessa declaração.
+- A API Rust implementada fica estável nesse release. Os limites que continuam
+  fora da promessa estão em `docs/security-revalidation-2026-11-13.md`.
 
 ## Evidências
 

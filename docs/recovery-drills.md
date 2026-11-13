@@ -104,6 +104,16 @@ not isolated; that attempt is not counted as passing evidence or as a confirmed
 product defect. The serial reruns passed, but parallel execution remains
 unverified.
 
+**Current HEAD serial suite — 2026-11-13:** the same 45-test ignored selection
+passed once on `5492e748b8eaf72bf8e274d643e7f452e90c1d40` against fresh rootless
+loopback PostgreSQL 18.6, MySQL 8.4.13, and MariaDB 11.8.9. Counts were 16
+library/engine, 23 CLI, 3 DSL, and 3 legacy-import tests, with zero failures.
+PgBouncer and the three TLS tests stayed excluded. The containers were removed
+after the run. This repeats the applicable kill, disconnect, lock, bootstrap,
+upgrade, rollback, namespace, and source-change journeys on the required lines.
+It does not repeat the older patch lines, the parallel suite, or the separate
+TLS and PgBouncer evidence.
+
 **Additional MySQL/MariaDB CLI runs — 2026-11-07:** the eight opt-in tests for
 death before intent, after intent/before SQL, SQL-before-ACK, ACK-before-final
 state, same-namespace contention, shared-object namespaces, bootstrap failure,

@@ -10,7 +10,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "=0.4.13"
-database-migrator = { version = "=0.1.0", path = "..", features = ["fuzzing-harness"] }
+database-migrator = { version = "=1.0.0", path = "..", features = ["fuzzing-harness"] }
 
 [[bin]]
 name = "sql_scanner"

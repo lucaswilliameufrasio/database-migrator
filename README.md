@@ -1,7 +1,8 @@
 # Database Migrator
 
 `dbm` applies versioned SQL migrations to SQLite, PostgreSQL, MySQL, and MariaDB.
-The Rust API and the metadata format are still provisional. There is no release.
+Release 1.0.0 freezes the implemented Rust API and metadata format 5 on Linux
+x86_64. The crate has not been published to crates.io.
 
 Versions already exercised are in [docs/support-matrix.md](docs/support-matrix.md).
 Interrupted runs are in [docs/recovery-drills.md](docs/recovery-drills.md).
@@ -16,9 +17,10 @@ Upgrades are in [docs/upgrade-guide.md](docs/upgrade-guide.md).
 | MySQL | 8.4.11, 8.4.13 | 9.7.4 |
 | MariaDB | 10.11.14, 11.4.13, 11.8.2, 11.8.9 | 13.0.2 |
 
-PostgreSQL 18.6 is the line selected for the open G11 check. MySQL 8.4 is the
-current LTS line with the broad suite. MariaDB 11.8 is the newest line with
-that same suite. MariaDB 12.3 has not been run.
+PostgreSQL 18.6, MySQL 8.4.13, and MariaDB 11.8.9 were revalidated together
+on 2026-11-13. MySQL 8.4 is the current LTS line with the broad suite.
+MariaDB 11.8 is the newest line with that same suite. MariaDB 12.3 has not
+been run. macOS and Windows are not part of this release.
 
 ## Quick start
 

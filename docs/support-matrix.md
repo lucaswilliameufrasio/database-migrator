@@ -1,8 +1,9 @@
-# Provisional support matrix
+# Support matrix
 
-This matrix records versions exercised by the available project evidence; it is
-not a production-readiness claim or a complete V1 compatibility promise. The
-application and metadata contracts remain provisional.
+Release 1.0.0 declares Linux x86_64 and the server lines below. The 2026-11-13
+revalidation of the current commit is recorded after the historical runs. Those
+older paragraphs stay as written. macOS, Windows, and any server version not
+listed here are outside this release.
 
 ## Database servers
 
@@ -40,4 +41,15 @@ matrix or security review.
 
 The server matrix is limited to the exact versions above and the behaviors
 named here. It does not imply support for other releases, topologies, cloud
-proxies, all TLS configurations, production deployments, or a stable V1 API.
+proxies, or all TLS configurations.
+
+**Current commit revalidation — 2026-11-13:** on
+`5492e748b8eaf72bf8e274d643e7f452e90c1d40`, the 45-test ignored workspace
+selection passed once, serially, against disposable rootless loopback
+PostgreSQL 18.6, MySQL 8.4.13, and MariaDB 11.8.9. The result was 16
+library/engine, 23 CLI, 3 DSL, and 3 legacy-import tests, with zero failures.
+PgBouncer and three TLS tests were excluded. Both fuzz targets then completed
+300-second campaigns in the network-disabled sandbox with zero crash files.
+Details are in `security-revalidation-2026-11-13.md`. Older patch lines were
+not repeated on this commit. MariaDB 12.3 remains unexercised. The
+default-parallel suite remains unverified.

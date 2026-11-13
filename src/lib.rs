@@ -1,7 +1,8 @@
 //! SQL-only database migration engine with SQLite, PostgreSQL, MySQL, and MariaDB adapters.
 //!
-//! The public API and database metadata remain provisional until the full V1
-//! extension and compatibility contracts have been validated.
+//! Release 1.0.0 freezes this implemented API and metadata format 5 for the
+//! evidenced Linux x86_64 build. Platforms and boundaries not listed in the
+//! support matrix are outside that promise.
 
 #[cfg(feature = "ai")]
 pub mod ai;

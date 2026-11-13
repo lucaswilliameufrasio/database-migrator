@@ -1,8 +1,8 @@
-# Upgrade and metadata migration guide (draft)
+# Upgrade and metadata migration guide
 
-This guide describes the current explicit metadata upgrade path. It is not a
-production cutover approval. The application package, public API, and metadata
-format remain provisional pending G11/G12.
+This guide describes the explicit metadata upgrade path for release 1.0.0.
+Metadata format 5 is the mutable format. The guide is not a cutover approval
+for a server, platform, or topology outside the support matrix.
 
 ## Before updating the application
 

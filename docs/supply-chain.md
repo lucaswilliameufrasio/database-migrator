@@ -750,3 +750,12 @@ logs, results, and sandbox controls are retained beside the corpora. These are
 bounded fuzz results, not proof of parser correctness. No PostgreSQL integration
 or shared/real database service was used. The result does not close the recovery
 matrix or G11, and no absence-of-critical-issues claim is made.
+
+**Both targets on the production-approval HEAD — 2026-11-13:** from
+`5492e748b8eaf72bf8e274d643e7f452e90c1d40`, the same image and resource limits
+ran one Cargo build job. `sql_scanner` reached 1,688,789 executions and 541 MiB
+RSS. `migration_parser` reached 2,423,239 executions and 564 MiB RSS. Both
+exited 0 on the 300-second limit and left no crash files. The generated corpora
+were retained outside the repository. The counts, hashes, and sandbox controls
+are in `docs/security-revalidation-2026-11-13.md`. This is bounded evidence, not
+a proof of parser correctness.
