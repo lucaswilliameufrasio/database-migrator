@@ -1,0 +1,12 @@
+version = 1
+namespace = "default"
+source = ["migrations/versioned"]
+
+[target]
+driver = "mysql"
+url_env = "DBM_EXAMPLE_MARIADB_URL"
+environment = "development"
+allow_insecure_transport = true
+
+[execution]
+busy_timeout_seconds = 30

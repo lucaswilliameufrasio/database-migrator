@@ -1808,6 +1808,17 @@ passo é um projeto de exemplo com SQLite, PostgreSQL 18.6 e MariaDB 11.8.9,
 migrations com timestamp e ambientes `development` ou `test`. MySQL fica de fora
 desse exemplo.
 
+**Projeto de exemplo SQL — 2026-11-13:** `examples/sql-targets` reúne três
+configs `development` e uma migration timestampada por dialeto. SQLite usa o
+engine bundled. PostgreSQL está pinado em `postgres:18.6` e MariaDB em
+`mariadb:11.8.9`. MySQL não entra nesse exemplo. O Compose publica `127.0.0.1:55432`
+e `127.0.0.1:53306` e não monta diretório do host. A verificação local usou o
+daemon rootless já ativo, sem pull: `plan`, `up` e `down --steps 1` passaram
+nos três alvos; o `plan` do SQLite não criou o arquivo. Os containers
+`dbm-sql-example` e os volumes anônimos foram removidos ao final. `cargo run`
+precisa de `--bin dbm` porque o pacote também declara `dbm-test-runner`; o
+README principal foi ajustado nisso. G11 e G12 continuam abertos.
+
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 
 **G12** — Tag estável com release notes, checksums assinados quando possível, binários homologados, changelog, upgrade guide, compatibilidade semver, matriz de testes publicada e exemplos de CI de deploy seguros.

@@ -26,11 +26,11 @@ Requires Rust 1.89 or newer. The repository toolchain is 1.99.1. SQLite is
 bundled; no separate SQLite install is required.
 
 ```sh
-cargo run -- init
-cargo run -- new create_users
-cargo run -- plan
-cargo run -- up
-cargo run -- down --steps 1
+cargo run --bin dbm -- init
+cargo run --bin dbm -- new create_users
+cargo run --bin dbm -- plan
+cargo run --bin dbm -- up
+cargo run --bin dbm -- down --steps 1
 ```
 
 `cargo install --path .` installs the `dbm` binary. `dbm init` writes
@@ -164,6 +164,13 @@ server tests read `DBM_TEST_DATABASE_URL`, `DBM_TEST_MYSQL_URL`, and
 `DBM_TEST_MARIADB_URL`. TLS tests add `DBM_TEST_POSTGRES_CA_FILE`,
 `DBM_TEST_MYSQL_CA_FILE`, and `DBM_TEST_MARIADB_CA_FILE`. Point them at a
 disposable loopback database.
+
+## Example project
+
+[examples/sql-targets](examples/sql-targets/README.md) runs timestamped SQL on
+bundled SQLite, `postgres:18.6`, and `mariadb:11.8.9`. Compose publishes both
+servers on `127.0.0.1` only. MySQL is not in that example. The configs use
+`development`.
 
 ## License
 

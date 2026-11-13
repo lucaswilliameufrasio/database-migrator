@@ -24,6 +24,7 @@ draft for the planned V1; no stable release has been published.
   import for Knex, Goose, and SQLx formats.
 - Repeatable migrations, explicit namespaces, metadata v5, and opt-in AI
   proposals that never apply changes automatically.
+- Local SQL example with bundled SQLite, PostgreSQL 18.6, and MariaDB 11.8.9.
 - Executable SQLite registry/DSL examples, SQL scanner/parser fuzz targets,
   dependency policy checks, and a CI-generated CycloneDX SBOM artifact.
 

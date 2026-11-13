@@ -1,0 +1,31 @@
+name: dbm-sql-example
+
+services:
+  postgres:
+    image: postgres:18.6
+    environment:
+      POSTGRES_USER: dbm
+      POSTGRES_PASSWORD: dbm
+      POSTGRES_DB: dbm
+    ports:
+      - "127.0.0.1:55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dbm -d dbm"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  mariadb:
+    image: mariadb:11.8.9
+    environment:
+      MARIADB_USER: dbm
+      MARIADB_PASSWORD: dbm
+      MARIADB_DATABASE: dbm
+      MARIADB_ROOT_PASSWORD: dbm
+    ports:
+      - "127.0.0.1:53306:3306"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      timeout: 5s
+      retries: 30

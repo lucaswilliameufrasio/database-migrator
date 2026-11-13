@@ -1,0 +1,11 @@
+version = 1
+namespace = "default"
+source = ["migrations/versioned"]
+
+[target]
+driver = "sqlite"
+database = "items.sqlite"
+environment = "development"
+
+[execution]
+busy_timeout_seconds = 30
