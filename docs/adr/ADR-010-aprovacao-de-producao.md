@@ -26,6 +26,7 @@
 ## Consequências
 
 - Um `up` ou `down` de produção sem os dois hashes, ou com hashes de outro plano ou outro destino, não abre o banco para escrita.
+- A sessão que escreve é conferida de novo antes da primeira mutação. Se o schema, o banco ou a versão divergirem da leitura aprovada, a escrita não começa. No SQLite, criar um arquivo ausente troca `uninitialized` por `sqlite_version()`; essa troca continua aceita quando caminho, schema e banco permanecem os mesmos.
 - O operador precisa rodar o plano de novo quando o arquivo, o estado aplicado ou a identidade do servidor mudam.
 - Texto puro em produção continua proibido. Esta decisão não fecha G11 nem G12 e não autoriza tag ou publicação.
 

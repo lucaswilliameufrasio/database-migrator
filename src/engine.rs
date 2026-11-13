@@ -2042,7 +2042,8 @@ fn up_authorized(
     let migrations = discover(config)?;
     let snapshot = read_snapshot(config)?;
     let initial_plan = plan_from_snapshot(config, &migrations, &snapshot)?;
-    let fingerprint = sqlite_target_fingerprint(config)?;
+    let read_info = sqlite_target_info(config)?;
+    let fingerprint = target_fingerprint(config, &read_info);
     bind_production_approval(config, authorization, &initial_plan.plan_hash, &fingerprint)?;
     if initial_plan.operations.is_empty() {
         return Ok(execution_report(
@@ -2070,6 +2071,13 @@ fn up_authorized(
         .collect();
     let batch_id = Uuid::new_v4().to_string();
     let mut connection = open_mutable(config)?;
+    bind_sqlite_write_session(
+        config,
+        authorization,
+        &operation_plan_hash,
+        &read_info,
+        &connection,
+    )?;
     let mut applied = Vec::new();
 
     for operation in initial_plan.operations {
@@ -2167,7 +2175,8 @@ fn down_authorized(
     applied.sort_by_key(|migration| Reverse(migration.apply_order));
     let base_plan_hash = plan_hash(config, &migrations, &snapshot);
     let approval_hash = down_approval_hash(&base_plan_hash, steps);
-    let fingerprint = sqlite_target_fingerprint(config)?;
+    let read_info = sqlite_target_info(config)?;
+    let fingerprint = target_fingerprint(config, &read_info);
     bind_production_approval(config, authorization, &approval_hash, &fingerprint)?;
     if applied.is_empty() {
         return Ok(execution_report(
@@ -2208,6 +2217,13 @@ fn down_authorized(
     let operation_plan_hash = plan_hash(config, &migrations, &snapshot);
     let batch_id = Uuid::new_v4().to_string();
     let mut connection = open_mutable(config)?;
+    bind_sqlite_write_session(
+        config,
+        authorization,
+        &approval_hash,
+        &read_info,
+        &connection,
+    )?;
     let mut reverted = Vec::new();
 
     for applied_migration in applied.into_iter().take(steps) {
@@ -2272,7 +2288,7 @@ async fn execute_with_adapter(
     }
 
     let migrations = discover_on_worker_with_registry(config, registry).await?;
-    let (snapshot, info) = read_adapter_snapshot_with_info(config).await?;
+    let (snapshot, read_info) = read_adapter_snapshot_with_info(config).await?;
     let base_plan_hash = plan_hash(config, &migrations, &snapshot);
     let approval_hash = if direction == "down" {
         down_approval_hash(&base_plan_hash, down_steps)
@@ -2283,7 +2299,7 @@ async fn execute_with_adapter(
         config,
         authorization,
         &approval_hash,
-        &target_fingerprint(config, &info),
+        &target_fingerprint(config, &read_info),
     )?;
     if matches!(config.config.target.driver.as_str(), "postgres" | "mysql")
         && snapshot.initialized
@@ -2481,6 +2497,13 @@ async fn execute_with_adapter(
     }
     if let Some(registry) = registry
         && let Err(error) = registry.validate_database_info(info)
+    {
+        let _ = session.close().await;
+        return Err(error);
+    }
+    let write_fingerprint = approval_fingerprint_for_write_session(config, &read_info, info);
+    if let Err(error) =
+        bind_production_approval(config, authorization, &approval_hash, &write_fingerprint)
     {
         let _ = session.close().await;
         return Err(error);
@@ -5010,21 +5033,99 @@ fn validate_approval_digest(label: &str, value: &str) -> Result<()> {
 }
 
 pub(crate) fn sqlite_target_fingerprint(config: &LoadedConfig) -> Result<String> {
+    Ok(target_fingerprint(config, &sqlite_target_info(config)?))
+}
+
+fn sqlite_target_info(config: &LoadedConfig) -> Result<database::DatabaseInfo> {
     let path = config.sqlite_database_path()?;
     let server_version = if let Some(connection) = open_readonly(config)? {
         connection.query_row("SELECT sqlite_version()", [], |row| row.get(0))?
     } else {
         "uninitialized".to_owned()
     };
-    let info = database::DatabaseInfo {
+    Ok(database::DatabaseInfo {
         dialect: "sqlite",
         server_version,
         database: None,
         schema: Some("main".to_owned()),
         target_identity: Some(path.display().to_string()),
         session_id: None,
+    })
+}
+
+fn bind_sqlite_write_session(
+    config: &LoadedConfig,
+    authorization: Option<&ProductionAuthorization>,
+    approval_hash: &str,
+    read_info: &database::DatabaseInfo,
+    connection: &Connection,
+) -> Result<()> {
+    let server_version: String =
+        connection.query_row("SELECT sqlite_version()", [], |row| row.get(0))?;
+    let write_info = database::DatabaseInfo {
+        dialect: "sqlite",
+        server_version,
+        database: None,
+        schema: Some("main".to_owned()),
+        target_identity: read_info.target_identity.clone(),
+        session_id: None,
     };
-    Ok(target_fingerprint(config, &info))
+    let fingerprint = approval_fingerprint_for_write_session(config, read_info, &write_info);
+    bind_production_approval(config, authorization, approval_hash, &fingerprint)
+}
+
+/// Fingerprint of the session that is about to write.
+///
+/// Opening a missing SQLite file changes its version marker from
+/// `uninitialized` to `sqlite_version()`. That transition stays approved when
+/// the path, schema, and database are unchanged. Any other identity change
+/// must be approved again.
+fn approval_fingerprint_for_write_session(
+    config: &LoadedConfig,
+    read_info: &database::DatabaseInfo,
+    write_info: &database::DatabaseInfo,
+) -> String {
+    let mut write_info = write_info.clone();
+    if let Some(schema) = test_write_schema_override() {
+        write_info.schema = Some(schema);
+    }
+    let comparable = if read_info.dialect == "sqlite"
+        && write_info.dialect == "sqlite"
+        && read_info.server_version == "uninitialized"
+        && read_info.target_identity == write_info.target_identity
+        && read_info.database == write_info.database
+        && read_info.schema == write_info.schema
+    {
+        database::DatabaseInfo {
+            dialect: "sqlite",
+            server_version: "uninitialized".to_owned(),
+            database: write_info.database.clone(),
+            schema: write_info.schema.clone(),
+            target_identity: write_info.target_identity.clone(),
+            session_id: None,
+        }
+    } else {
+        write_info
+    };
+    target_fingerprint(config, &comparable)
+}
+
+fn test_write_schema_override() -> Option<String> {
+    #[cfg(test)]
+    {
+        WRITE_SESSION_SCHEMA_OVERRIDE
+            .try_with(|schema| schema.clone())
+            .ok()
+    }
+    #[cfg(not(test))]
+    {
+        None
+    }
+}
+
+#[cfg(test)]
+tokio::task_local! {
+    static WRITE_SESSION_SCHEMA_OVERRIDE: String;
 }
 
 fn down_approval_hash(base_plan_hash: &str, steps: usize) -> String {
@@ -5157,7 +5258,7 @@ mod tests {
         history, history_async, manifest_hash, plan, plan_async, plan_down, plan_from_snapshot,
         plan_hash, reconcile as engine_reconcile, reconcile_async, run_adapter_migration,
         split_sql_statements_for_dialect, sql_hash, status, status_async, up, up_async,
-        up_with_authorization, validate,
+        up_with_authorization, up_with_authorization_async, validate,
     };
     use crate::config::{self, LoadedConfig};
     use crate::database::{self, SessionIntent};
@@ -7464,6 +7565,108 @@ mod tests {
         let reverted =
             down_with_authorization(&production, 1, &approved_rollback).expect("approved rollback");
         assert_eq!(reverted.migrations.len(), 1);
+    }
+
+    #[test]
+    fn write_session_fingerprint_accepts_sqlite_creation_and_rejects_schema_drift() {
+        let (_directory, config) = setup();
+        let path = config
+            .sqlite_database_path()
+            .expect("sqlite path")
+            .display()
+            .to_string();
+        let missing = database::DatabaseInfo {
+            dialect: "sqlite",
+            server_version: "uninitialized".to_owned(),
+            database: None,
+            schema: Some("main".to_owned()),
+            target_identity: Some(path),
+            session_id: None,
+        };
+        let created = database::DatabaseInfo {
+            server_version: "3.53.2".to_owned(),
+            ..missing.clone()
+        };
+        assert_eq!(
+            super::approval_fingerprint_for_write_session(&config, &missing, &created),
+            super::target_fingerprint(&config, &missing)
+        );
+
+        let approved_session = database::DatabaseInfo {
+            dialect: "postgres",
+            server_version: "18.6".to_owned(),
+            database: Some("app".to_owned()),
+            schema: Some("public".to_owned()),
+            target_identity: Some("postgres://tcp:127.0.0.1:5432;database=app".to_owned()),
+            session_id: None,
+        };
+        let drifted_schema = database::DatabaseInfo {
+            schema: Some("other".to_owned()),
+            ..approved_session.clone()
+        };
+        assert_ne!(
+            super::approval_fingerprint_for_write_session(
+                &config,
+                &approved_session,
+                &drifted_schema
+            ),
+            super::target_fingerprint(&config, &approved_session)
+        );
+    }
+
+    #[tokio::test]
+    async fn production_write_stops_before_metadata_when_the_write_session_changes() {
+        let (_directory, config) = setup();
+        write_migration(
+            &config,
+            "20261021162643981234_create_items.sql",
+            "-- dbm:up\nCREATE TABLE items (id INTEGER);\n",
+        );
+        let mut production = config.clone();
+        production.config.target.environment = crate::config::Environment::Production;
+        let current = plan(&production).expect("read-only production plan");
+        let approved = ProductionAuthorization {
+            plan_hash: current.plan_hash,
+            target_fingerprint: current.target_fingerprint,
+        };
+        let database_path = production
+            .sqlite_database_path()
+            .expect("sqlite path")
+            .to_path_buf();
+
+        super::WRITE_SESSION_SCHEMA_OVERRIDE
+            .scope("other".to_owned(), async {
+                let sync_error = up_with_authorization(&production, &approved)
+                    .expect_err("changed write session must not apply");
+                assert!(matches!(sync_error, DbmError::Safety(_)));
+                assert_sqlite_has_no_migration_effect(&database_path);
+                fs::remove_file(&database_path).expect("remove empty rejected database");
+
+                let async_error = up_with_authorization_async(&production, &approved)
+                    .await
+                    .expect_err("changed async write session must not apply");
+                assert!(matches!(async_error, DbmError::Safety(_)));
+                assert_sqlite_has_no_migration_effect(&database_path);
+            })
+            .await;
+    }
+
+    fn assert_sqlite_has_no_migration_effect(path: &std::path::Path) {
+        assert!(
+            path.is_file(),
+            "write session opens before its approval check"
+        );
+        let connection = rusqlite::Connection::open(path).expect("open rejected database");
+        for name in ["schema_migration_meta", "items"] {
+            let exists: bool = connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = ?1)",
+                    [name],
+                    |row| row.get(0),
+                )
+                .expect("lookup rejected database");
+            assert!(!exists, "{name} was written before write-session approval");
+        }
     }
 
     #[test]

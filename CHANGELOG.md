@@ -5,6 +5,13 @@ draft for the planned V1; no stable release has been published.
 
 ## Unreleased
 
+### Fixed
+
+- Production `up` and `down` check the write session's target fingerprint again
+  before the first metadata mutation. Creating a missing SQLite file still
+  matches an `uninitialized` approval when the path, schema, and database are
+  unchanged. This does not close G11 or G12.
+
 ### Changed
 
 - `environment = production` can apply `up` and `down` when the operator passes

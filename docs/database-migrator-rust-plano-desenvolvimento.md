@@ -1835,6 +1835,8 @@ passou (160 passed, 49 ignored; formatação, Clippy e build). O commit
 qualidade em 3m45s, supply-chain em 4m43s e performance informativa em 2m43s.
 Isso não fecha G11.
 
+**Revisão do gate de produção no HEAD — 2026-11-13:** o delta desde `13de8a1` mantém as quatro mitigações de `4cca4dc` e a rejeição de identificadores PostgreSQL `U&`. O contrato de `192c3dd` conferia o fingerprint da sessão de leitura e só depois abria outra sessão para escrever. `up` e `down` agora recalculam esse fingerprint na sessão de escrita, antes de `initialize_metadata` ou do journal, e recusam a mutação se schema, banco ou versão divergirem. Criar um SQLite ausente continua aceito: `uninitialized` passa a `sqlite_version()` quando caminho, schema e banco não mudam. O teste força schema `other` só nessa segunda conferência e verifica que o arquivo aberto não recebe metadata nem a tabela da migration. O gate local passou: formatação, `git diff --check`, Clippy com `-D warnings`, build, os dois exemplos SQLite e `cargo test --workspace --all-features --locked` com 162 passed e 49 ignored. Os testes opt-in de PostgreSQL, MySQL e MariaDB não rodaram. G11 continua aberto: o relatório externo permanece no baseline `3822695`, a matriz de falha e o fuzz não foram reexecutados neste HEAD, e não há tag nem publicação.
+
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 
 **G12** — Tag estável com release notes, checksums assinados quando possível, binários homologados, changelog, upgrade guide, compatibilidade semver, matriz de testes publicada e exemplos de CI de deploy seguros.
