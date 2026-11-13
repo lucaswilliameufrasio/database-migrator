@@ -49,11 +49,31 @@ enum Command {
         migration_format: MigrationFormatArg,
     },
     Validate,
-    Plan,
-    Up,
+    Plan {
+        /// Print the rollback approval hash instead of the up plan hash.
+        #[arg(long)]
+        down: bool,
+        /// Rollback steps. Used with --down and ignored otherwise.
+        #[arg(long, default_value_t = 1)]
+        steps: usize,
+    },
+    Up {
+        /// Plan hash from the current read-only plan.
+        #[arg(long)]
+        approve_plan: Option<String>,
+        /// Target fingerprint from the current read-only plan.
+        #[arg(long)]
+        approve_target: Option<String>,
+    },
     Down {
         #[arg(long, default_value_t = 1)]
         steps: usize,
+        /// Rollback plan hash from `dbm plan --down --steps N`.
+        #[arg(long)]
+        approve_plan: Option<String>,
+        /// Target fingerprint from the current read-only plan.
+        #[arg(long)]
+        approve_target: Option<String>,
     },
     Status,
     History,
@@ -129,6 +149,9 @@ enum DoctorCommand {
         actor: String,
         #[arg(long)]
         approve: bool,
+        /// Target fingerprint from the current read-only plan.
+        #[arg(long)]
+        approve_target: Option<String>,
     },
 }
 
@@ -137,6 +160,9 @@ enum MetadataCommand {
     Upgrade {
         #[arg(long)]
         yes: bool,
+        /// Target fingerprint from the current read-only plan.
+        #[arg(long)]
+        approve_target: Option<String>,
     },
 }
 
@@ -157,6 +183,9 @@ enum ImportCommand {
         plan_digest: String,
         #[arg(long)]
         yes: bool,
+        /// Target fingerprint from the current read-only plan.
+        #[arg(long)]
+        approve_target: Option<String>,
     },
     Verify {
         #[arg(long, value_enum)]
@@ -181,6 +210,9 @@ enum ImportCommand {
         actor: String,
         #[arg(long)]
         yes: bool,
+        /// Target fingerprint from the current read-only plan.
+        #[arg(long)]
+        approve_target: Option<String>,
     },
 }
 
@@ -240,8 +272,8 @@ impl Cli {
             Command::Init { .. } => "init",
             Command::New { .. } => "new",
             Command::Validate => "validate",
-            Command::Plan => "plan",
-            Command::Up => "up",
+            Command::Plan { .. } => "plan",
+            Command::Up { .. } => "up",
             Command::Down { .. } => "down",
             Command::Status => "status",
             Command::History => "history",
@@ -331,7 +363,9 @@ impl Cli {
                 })
                 .await?;
                 if loaded.config.execution.runner.is_some() {
-                    match runner::invoke(&config_path, &loaded, RunnerOperation::Validate).await? {
+                    match runner::invoke(&config_path, &loaded, RunnerOperation::Validate, None)
+                        .await?
+                    {
                         RunnerOutput::ReadOnly(report) => {
                             emit_runner_validate(&report, self.format)?;
                         }
@@ -356,7 +390,7 @@ impl Cli {
                     }
                 }
             }
-            Command::Plan => {
+            Command::Plan { down, steps } => {
                 let config_path = self.config.clone();
                 let load_path = config_path.clone();
                 let namespace = self.namespace.clone();
@@ -365,8 +399,12 @@ impl Cli {
                 })
                 .await?;
                 if loaded.config.execution.runner.is_some() {
-                    let output =
-                        runner::invoke(&config_path, &loaded, RunnerOperation::Plan).await?;
+                    let operation = if down {
+                        RunnerOperation::PlanDown { steps }
+                    } else {
+                        RunnerOperation::Plan
+                    };
+                    let output = runner::invoke(&config_path, &loaded, operation, None).await?;
                     match output {
                         RunnerOutput::Plan(report) => emit_runner_plan(&report, self.format)?,
                         RunnerOutput::ReadOnly(_) => {
@@ -377,11 +415,16 @@ impl Cli {
                         }
                     }
                 } else {
-                    let report = engine::plan_async(&loaded).await?;
+                    let report = if down {
+                        engine::plan_down_async(&loaded, steps).await?
+                    } else {
+                        engine::plan_async(&loaded).await?
+                    };
                     if self.format == OutputFormat::Json {
                         print_json(&report)?;
                     } else {
                         println!("Plan {} ({})", report.plan_hash, report.status);
+                        println!("Target {}", report.target_fingerprint);
                         if report.operations.is_empty() {
                             println!("No pending migrations.");
                         }
@@ -396,7 +439,11 @@ impl Cli {
                     }
                 }
             }
-            Command::Up => {
+            Command::Up {
+                approve_plan,
+                approve_target,
+            } => {
+                let authorization = production_authorization(approve_plan, approve_target)?;
                 let config_path = self.config.clone();
                 let load_path = config_path.clone();
                 let namespace = self.namespace.clone();
@@ -405,7 +452,9 @@ impl Cli {
                 })
                 .await?;
                 if loaded.config.execution.runner.is_some() {
-                    let output = runner::invoke(&config_path, &loaded, RunnerOperation::Up).await?;
+                    let output =
+                        runner::invoke(&config_path, &loaded, RunnerOperation::Up, authorization)
+                            .await?;
                     match output {
                         RunnerOutput::Execution(report) => {
                             emit_runner_execution(&report, self.format)?;
@@ -418,11 +467,21 @@ impl Cli {
                         }
                     }
                 } else {
-                    let report = engine::up_async(&loaded).await?;
+                    let report = match authorization {
+                        None => engine::up_async(&loaded).await?,
+                        Some(authorization) => {
+                            engine::up_with_authorization_async(&loaded, &authorization).await?
+                        }
+                    };
                     emit_execution(&report, self.format)?;
                 }
             }
-            Command::Down { steps } => {
+            Command::Down {
+                steps,
+                approve_plan,
+                approve_target,
+            } => {
+                let authorization = production_authorization(approve_plan, approve_target)?;
                 let config_path = self.config.clone();
                 let load_path = config_path.clone();
                 let namespace = self.namespace.clone();
@@ -431,9 +490,13 @@ impl Cli {
                 })
                 .await?;
                 if loaded.config.execution.runner.is_some() {
-                    let output =
-                        runner::invoke(&config_path, &loaded, RunnerOperation::Down { steps })
-                            .await?;
+                    let output = runner::invoke(
+                        &config_path,
+                        &loaded,
+                        RunnerOperation::Down { steps },
+                        authorization,
+                    )
+                    .await?;
                     match output {
                         RunnerOutput::Execution(report) => {
                             emit_runner_execution(&report, self.format)?;
@@ -446,7 +509,13 @@ impl Cli {
                         }
                     }
                 } else {
-                    let report = engine::down_async(&loaded, steps).await?;
+                    let report = match authorization {
+                        None => engine::down_async(&loaded, steps).await?,
+                        Some(authorization) => {
+                            engine::down_with_authorization_async(&loaded, steps, &authorization)
+                                .await?
+                        }
+                    };
                     emit_execution(&report, self.format)?;
                 }
             }
@@ -459,7 +528,9 @@ impl Cli {
                 })
                 .await?;
                 if loaded.config.execution.runner.is_some() {
-                    match runner::invoke(&config_path, &loaded, RunnerOperation::Status).await? {
+                    match runner::invoke(&config_path, &loaded, RunnerOperation::Status, None)
+                        .await?
+                    {
                         RunnerOutput::ReadOnly(report) => {
                             emit_runner_status(&report, self.format)?;
                         }
@@ -497,7 +568,9 @@ impl Cli {
                 })
                 .await?;
                 if loaded.config.execution.runner.is_some() {
-                    match runner::invoke(&config_path, &loaded, RunnerOperation::History).await? {
+                    match runner::invoke(&config_path, &loaded, RunnerOperation::History, None)
+                        .await?
+                    {
                         RunnerOutput::ReadOnly(report) => {
                             emit_runner_history(&report, self.format)?;
                         }
@@ -535,7 +608,8 @@ impl Cli {
                     })
                     .await?;
                     if loaded.config.execution.runner.is_some() {
-                        match runner::invoke(&config_path, &loaded, RunnerOperation::Doctor).await?
+                        match runner::invoke(&config_path, &loaded, RunnerOperation::Doctor, None)
+                            .await?
                         {
                             RunnerOutput::ReadOnly(report) => {
                                 emit_runner_doctor(&report, self.format)?;
@@ -569,6 +643,7 @@ impl Cli {
                     reason,
                     actor,
                     approve,
+                    approve_target,
                 }) => {
                     let config_path = self.config.clone();
                     let namespace = self.namespace.clone();
@@ -620,6 +695,7 @@ impl Cli {
                             reason: &reason,
                             actor: &actor,
                             approved: approve,
+                            approved_target: approve_target.as_deref(),
                         },
                     )
                     .await?;
@@ -634,21 +710,29 @@ impl Cli {
                 }
             },
             Command::Metadata { action } => match action {
-                MetadataCommand::Upgrade { yes } => {
+                MetadataCommand::Upgrade {
+                    yes,
+                    approve_target,
+                } => {
                     let config_path = self.config.clone();
                     let namespace = self.namespace.clone();
                     let loaded_config = run_blocking(move || {
                         config::load_with_namespace(&config_path, namespace.as_deref())
                     })
                     .await?;
-                    let report = engine::upgrade_metadata_async(&loaded_config, yes).await?;
+                    let report = engine::upgrade_metadata_async(
+                        &loaded_config,
+                        yes,
+                        approve_target.as_deref(),
+                    )
+                    .await?;
                     if self.format == OutputFormat::Json {
                         print_json(&report)?;
                     } else {
                         println!("Metadata upgrade: {}", report.status);
                         if report.status == "requires_approval" {
                             println!(
-                                "Review the target and repeat with --yes to apply the transactional upgrade."
+                                "Review the target and repeat with --yes to apply the transactional upgrade. Production targets also require --approve-target from the current read-only plan."
                             );
                         }
                     }
@@ -713,6 +797,7 @@ impl Cli {
                     from,
                     plan_digest,
                     yes,
+                    approve_target,
                 } => {
                     if !yes {
                         return Err(DbmError::Safety(
@@ -726,7 +811,9 @@ impl Cli {
                         config::load_with_namespace(&config_path, namespace.as_deref())
                     })
                     .await?;
-                    let report = legacy::apply_async(&config, from, &plan_digest).await?;
+                    let report =
+                        legacy::apply_async(&config, from, &plan_digest, approve_target.as_deref())
+                            .await?;
                     if self.format == OutputFormat::Json {
                         print_json(&report)?;
                     } else {
@@ -767,6 +854,7 @@ impl Cli {
                     reason,
                     actor,
                     yes,
+                    approve_target,
                 } => {
                     let config_path = self.config.clone();
                     let namespace = self.namespace.clone();
@@ -797,6 +885,7 @@ impl Cli {
                             reason: &reason,
                             actor: &actor,
                             approved: yes,
+                            approved_target: approve_target.as_deref(),
                         },
                     )
                     .await?;
@@ -915,6 +1004,22 @@ fn error_code(error: &DbmError) -> &'static str {
     }
 }
 
+fn production_authorization(
+    approve_plan: Option<String>,
+    approve_target: Option<String>,
+) -> Result<Option<engine::ProductionAuthorization>> {
+    match (approve_plan, approve_target) {
+        (None, None) => Ok(None),
+        (Some(plan_hash), Some(target_fingerprint)) => Ok(Some(engine::ProductionAuthorization {
+            plan_hash,
+            target_fingerprint,
+        })),
+        (Some(_), None) | (None, Some(_)) => Err(DbmError::Configuration(
+            "production approval requires both --approve-plan and --approve-target".to_owned(),
+        )),
+    }
+}
+
 fn emit_execution(report: &crate::engine::ExecutionReport, format: OutputFormat) -> Result<()> {
     if format == OutputFormat::Json {
         print_json(report)?;
@@ -946,6 +1051,11 @@ fn emit_runner_plan(report: &Value, format: OutputFormat) -> Result<()> {
         .and_then(Value::as_str)
         .ok_or_else(|| protocol_output_error("runner plan has no status"))?;
     println!("Plan {plan_hash} ({status})");
+    let target_fingerprint = report
+        .get("target_fingerprint")
+        .and_then(Value::as_str)
+        .ok_or_else(|| protocol_output_error("runner plan has no target_fingerprint"))?;
+    println!("Target {target_fingerprint}");
     let operations = report
         .get("operations")
         .and_then(Value::as_array)

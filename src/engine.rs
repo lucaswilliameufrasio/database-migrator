@@ -61,6 +61,8 @@ pub struct PlanReport {
     pub namespace: String,
     pub status: &'static str,
     pub plan_hash: String,
+    pub approval_plan_hash: String,
+    pub target_fingerprint: String,
     pub read_only: bool,
     pub operations: Vec<PlanOperation>,
     pub warnings: Vec<String>,
@@ -168,6 +170,7 @@ pub struct ReconcileRequest<'a> {
     pub reason: &'a str,
     pub actor: &'a str,
     pub approved: bool,
+    pub approved_target: Option<&'a str>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -195,6 +198,12 @@ enum RepairPlanStepState {
     Indeterminate,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProductionAuthorization {
+    pub plan_hash: String,
+    pub target_fingerprint: String,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct ExecutionReport {
     pub schema_version: &'static str,
@@ -216,6 +225,7 @@ pub(crate) enum RunnerAction {
     Doctor,
     Up,
     Down { steps: usize },
+    PlanDown { steps: usize },
 }
 
 pub(crate) struct RunnerPreflight {
@@ -257,7 +267,19 @@ pub fn plan(config: &LoadedConfig) -> Result<PlanReport> {
     config.sqlite_database_path()?;
     let migrations = discover(config)?;
     let snapshot = read_snapshot(config)?;
-    plan_from_snapshot(config, &migrations, &snapshot)
+    let mut report = plan_from_snapshot(config, &migrations, &snapshot)?;
+    report.target_fingerprint = sqlite_target_fingerprint(config)?;
+    Ok(report)
+}
+
+pub fn plan_down(config: &LoadedConfig, steps: usize) -> Result<PlanReport> {
+    config.sqlite_database_path()?;
+    let migrations = discover(config)?;
+    let snapshot = read_snapshot(config)?;
+    let report = plan_from_snapshot(config, &migrations, &snapshot)?;
+    let mut report = with_down_plan(&migrations, &snapshot, steps, report)?;
+    report.target_fingerprint = sqlite_target_fingerprint(config)?;
+    Ok(report)
 }
 
 pub fn status(config: &LoadedConfig) -> Result<StatusReport> {
@@ -780,17 +802,18 @@ pub async fn validate_with_registry_async(
 
 pub async fn plan_async(config: &LoadedConfig) -> Result<PlanReport> {
     let migrations = discover_on_worker(config).await?;
-    let snapshot = read_adapter_snapshot(config).await?;
+    let (snapshot, info) = read_adapter_snapshot_with_info(config).await?;
     let mut report = plan_from_snapshot(config, &migrations, &snapshot)?;
+    report.target_fingerprint = target_fingerprint(config, &info);
     if config.config.target.driver == "postgres" {
         report.warnings.push(
-            "PostgreSQL planning is read-only and does not initialize metadata; up/down writes require metadata format 4 and a non-production target"
+            "PostgreSQL planning is read-only and does not initialize metadata; up/down writes require metadata format 5 and explicit approval when the target environment is production"
                 .to_owned(),
         );
     }
     if config.config.target.driver == "mysql" {
         report.warnings.push(
-            "MySQL/MariaDB planning is read-only; initial migration execution requires explicit transaction=never and metadata format 4"
+            "MySQL/MariaDB planning is read-only; initial migration execution requires explicit transaction=never and metadata format 5"
                 .to_owned(),
         );
     }
@@ -798,6 +821,27 @@ pub async fn plan_async(config: &LoadedConfig) -> Result<PlanReport> {
     {
         report.warnings.push(
             "database migration metadata is not initialized; no target schema or metadata was created"
+                .to_owned(),
+        );
+    }
+    Ok(report)
+}
+
+pub async fn plan_down_async(config: &LoadedConfig, steps: usize) -> Result<PlanReport> {
+    let migrations = discover_on_worker(config).await?;
+    let (snapshot, info) = read_adapter_snapshot_with_info(config).await?;
+    let report = plan_from_snapshot(config, &migrations, &snapshot)?;
+    let mut report = with_down_plan(&migrations, &snapshot, steps, report)?;
+    report.target_fingerprint = target_fingerprint(config, &info);
+    if config.config.target.driver == "postgres" {
+        report.warnings.push(
+            "PostgreSQL planning is read-only and does not initialize metadata; up/down writes require metadata format 5 and explicit approval when the target environment is production"
+                .to_owned(),
+        );
+    }
+    if config.config.target.driver == "mysql" {
+        report.warnings.push(
+            "MySQL/MariaDB planning is read-only; initial migration execution requires explicit transaction=never and metadata format 5"
                 .to_owned(),
         );
     }
@@ -977,7 +1021,11 @@ async fn read_adapter_snapshot_with_info(
     }
 }
 
-pub fn upgrade_metadata(config: &LoadedConfig, approved: bool) -> Result<MetadataUpgradeReport> {
+pub fn upgrade_metadata(
+    config: &LoadedConfig,
+    approved: bool,
+    approved_target: Option<&str>,
+) -> Result<MetadataUpgradeReport> {
     config.sqlite_database_path()?;
     let Some(connection) = open_readonly(config)? else {
         return Ok(metadata_upgrade_report("no_metadata", true, None, 0));
@@ -1009,6 +1057,9 @@ pub fn upgrade_metadata(config: &LoadedConfig, approved: bool) -> Result<Metadat
         |row| row.get(0),
     )?;
     drop(connection);
+    if approved_target.is_some() {
+        require_production_target(config, approved_target)?;
+    }
     if !approved {
         return Ok(metadata_upgrade_report(
             "requires_approval",
@@ -1017,7 +1068,9 @@ pub fn upgrade_metadata(config: &LoadedConfig, approved: bool) -> Result<Metadat
             usize::try_from(runs_preserved).unwrap_or(0),
         ));
     }
-    require_mutation_environment(config)?;
+    require_production_target(config, approved_target)?;
+    let fingerprint = sqlite_target_fingerprint(config)?;
+    bind_production_target(config, approved_target, &fingerprint)?;
 
     let mut connection = open_mutable(config)?;
     let transaction = begin_immediate(&mut connection)?;
@@ -1044,10 +1097,15 @@ pub fn upgrade_metadata(config: &LoadedConfig, approved: bool) -> Result<Metadat
 pub async fn upgrade_metadata_async(
     config: &LoadedConfig,
     approved: bool,
+    approved_target: Option<&str>,
 ) -> Result<MetadataUpgradeReport> {
     if config.config.target.driver == "sqlite" {
         let config = config.clone();
-        return run_blocking(move || upgrade_metadata(&config, approved)).await;
+        let approved_target = approved_target.map(str::to_owned);
+        return run_blocking(move || {
+            upgrade_metadata(&config, approved, approved_target.as_deref())
+        })
+        .await;
     }
 
     if !matches!(config.config.target.driver.as_str(), "postgres" | "mysql") {
@@ -1080,6 +1138,9 @@ pub async fn upgrade_metadata_async(
         )));
     }
     let runs_preserved = snapshot.runs.len();
+    if approved_target.is_some() {
+        require_production_target(config, approved_target)?;
+    }
     if !approved {
         return Ok(metadata_upgrade_report(
             "requires_approval",
@@ -1088,10 +1149,14 @@ pub async fn upgrade_metadata_async(
             runs_preserved,
         ));
     }
-    require_mutation_environment(config)?;
+    require_production_target(config, approved_target)?;
 
     let adapter = database::adapter_for(config)?;
     let mut session = adapter.connect(config, SessionIntent::ReadWrite).await?;
+    if let Err(error) = bind_production_target_info(config, approved_target, session.info()) {
+        let _ = session.close().await;
+        return Err(error);
+    }
     let result = async {
         session
             .acquire_lock(Duration::from_secs(
@@ -1162,9 +1227,12 @@ pub fn reconcile(config: &LoadedConfig, request: ReconcileRequest<'_>) -> Result
         reason,
         actor,
         approved,
+        approved_target,
     } = request;
     let database_path = config.sqlite_database_path()?;
-    require_mutation_environment(config)?;
+    require_production_target(config, approved_target)?;
+    let fingerprint = sqlite_target_fingerprint(config)?;
+    bind_production_target(config, approved_target, &fingerprint)?;
     validate_reconcile_request_fields(
         operation_result,
         evidence_ref,
@@ -1355,6 +1423,7 @@ pub async fn reconcile_async(
             let reason = request.reason.to_owned();
             let actor = request.actor.to_owned();
             let approved = request.approved;
+            let approved_target = request.approved_target.map(str::to_owned);
             run_blocking(move || {
                 reconcile(
                     &config,
@@ -1366,6 +1435,7 @@ pub async fn reconcile_async(
                         reason: &reason,
                         actor: &actor,
                         approved,
+                        approved_target: approved_target.as_deref(),
                     },
                 )
             })
@@ -1391,7 +1461,7 @@ async fn reconcile_postgres_async(
         request.actor,
         request.approved,
     )?;
-    require_mutation_environment(config)?;
+    require_production_target(config, request.approved_target)?;
     let migrations = discover_on_worker(config).await?;
     let adapter = database::adapter_for(config)?;
     let mut session = adapter.connect(config, SessionIntent::ReadWrite).await?;
@@ -1402,6 +1472,11 @@ async fn reconcile_postgres_async(
             driver: "PostgreSQL adapter",
             message: "connected session returned invalid server identity".to_owned(),
         });
+    }
+    let live_fingerprint = target_fingerprint(config, info);
+    if let Err(error) = bind_production_target(config, request.approved_target, &live_fingerprint) {
+        let _ = session.close().await;
+        return Err(error);
     }
 
     let result = async {
@@ -1614,7 +1689,7 @@ async fn reconcile_mysql_async(
         request.actor,
         request.approved,
     )?;
-    require_mutation_environment(config)?;
+    require_production_target(config, request.approved_target)?;
     let migrations = discover_on_worker(config).await?;
     let adapter = database::adapter_for(config)?;
     let mut session = adapter.connect(config, SessionIntent::ReadWrite).await?;
@@ -1625,6 +1700,11 @@ async fn reconcile_mysql_async(
             driver: "MySQL/MariaDB adapter",
             message: "connected session returned invalid server identity".to_owned(),
         });
+    }
+    let live_fingerprint = target_fingerprint(config, info);
+    if let Err(error) = bind_production_target(config, request.approved_target, &live_fingerprint) {
+        let _ = session.close().await;
+        return Err(error);
     }
 
     let result = async {
@@ -1941,13 +2021,29 @@ fn read_metadata_version(connection: &Connection) -> Result<Option<i64>> {
 }
 
 pub fn up(config: &LoadedConfig) -> Result<ExecutionReport> {
+    up_authorized(config, None)
+}
+
+pub fn up_with_authorization(
+    config: &LoadedConfig,
+    authorization: &ProductionAuthorization,
+) -> Result<ExecutionReport> {
+    up_authorized(config, Some(authorization))
+}
+
+fn up_authorized(
+    config: &LoadedConfig,
+    authorization: Option<&ProductionAuthorization>,
+) -> Result<ExecutionReport> {
     let database_path = config.sqlite_database_path()?;
-    require_mutation_environment(config)?;
+    require_mutation_environment(config, authorization)?;
     ensure_metadata_path_is_not_directory(database_path)?;
 
     let migrations = discover(config)?;
     let snapshot = read_snapshot(config)?;
     let initial_plan = plan_from_snapshot(config, &migrations, &snapshot)?;
+    let fingerprint = sqlite_target_fingerprint(config)?;
+    bind_production_approval(config, authorization, &initial_plan.plan_hash, &fingerprint)?;
     if initial_plan.operations.is_empty() {
         return Ok(execution_report(
             config,
@@ -2020,8 +2116,24 @@ pub fn up(config: &LoadedConfig) -> Result<ExecutionReport> {
 }
 
 pub fn down(config: &LoadedConfig, steps: usize) -> Result<ExecutionReport> {
+    down_authorized(config, steps, None)
+}
+
+pub fn down_with_authorization(
+    config: &LoadedConfig,
+    steps: usize,
+    authorization: &ProductionAuthorization,
+) -> Result<ExecutionReport> {
+    down_authorized(config, steps, Some(authorization))
+}
+
+fn down_authorized(
+    config: &LoadedConfig,
+    steps: usize,
+    authorization: Option<&ProductionAuthorization>,
+) -> Result<ExecutionReport> {
     let database_path = config.sqlite_database_path()?;
-    require_mutation_environment(config)?;
+    require_mutation_environment(config, authorization)?;
     ensure_metadata_path_is_not_directory(database_path)?;
     if steps == 0 {
         return Err(DbmError::Configuration(
@@ -2053,6 +2165,10 @@ pub fn down(config: &LoadedConfig, steps: usize) -> Result<ExecutionReport> {
         .cloned()
         .collect();
     applied.sort_by_key(|migration| Reverse(migration.apply_order));
+    let base_plan_hash = plan_hash(config, &migrations, &snapshot);
+    let approval_hash = down_approval_hash(&base_plan_hash, steps);
+    let fingerprint = sqlite_target_fingerprint(config)?;
+    bind_production_approval(config, authorization, &approval_hash, &fingerprint)?;
     if applied.is_empty() {
         return Ok(execution_report(
             config,
@@ -2143,8 +2259,9 @@ async fn execute_with_adapter(
     direction: &'static str,
     down_steps: usize,
     registry: Option<&MigrationRegistry>,
+    authorization: Option<&ProductionAuthorization>,
 ) -> Result<ExecutionReport> {
-    require_mutation_environment(config)?;
+    require_mutation_environment(config, authorization)?;
     if config.config.target.driver == "sqlite" {
         ensure_metadata_path_is_not_directory(config.sqlite_database_path()?)?;
     }
@@ -2155,7 +2272,19 @@ async fn execute_with_adapter(
     }
 
     let migrations = discover_on_worker_with_registry(config, registry).await?;
-    let snapshot = read_adapter_snapshot(config).await?;
+    let (snapshot, info) = read_adapter_snapshot_with_info(config).await?;
+    let base_plan_hash = plan_hash(config, &migrations, &snapshot);
+    let approval_hash = if direction == "down" {
+        down_approval_hash(&base_plan_hash, down_steps)
+    } else {
+        base_plan_hash
+    };
+    bind_production_approval(
+        config,
+        authorization,
+        &approval_hash,
+        &target_fingerprint(config, &info),
+    )?;
     if matches!(config.config.target.driver.as_str(), "postgres" | "mysql")
         && snapshot.initialized
         && snapshot.metadata_format_version != Some(crate::storage::METADATA_FORMAT_VERSION)
@@ -3268,11 +3397,26 @@ fn ensure_adapter_operation_is_current(
 }
 
 pub async fn up_async(config: &LoadedConfig) -> Result<ExecutionReport> {
-    execute_with_adapter(config, "up", 0, None).await
+    execute_with_adapter(config, "up", 0, None, None).await
+}
+
+pub async fn up_with_authorization_async(
+    config: &LoadedConfig,
+    authorization: &ProductionAuthorization,
+) -> Result<ExecutionReport> {
+    execute_with_adapter(config, "up", 0, None, Some(authorization)).await
 }
 
 pub async fn down_async(config: &LoadedConfig, steps: usize) -> Result<ExecutionReport> {
-    execute_with_adapter(config, "down", steps, None).await
+    execute_with_adapter(config, "down", steps, None, None).await
+}
+
+pub async fn down_with_authorization_async(
+    config: &LoadedConfig,
+    steps: usize,
+    authorization: &ProductionAuthorization,
+) -> Result<ExecutionReport> {
+    execute_with_adapter(config, "down", steps, None, Some(authorization)).await
 }
 
 /// Plans filesystem and compiled migrations together without executing SQL.
@@ -3284,9 +3428,10 @@ pub async fn plan_with_registry_async(
     let (snapshot, info) = read_adapter_snapshot_with_info(config).await?;
     registry.validate_database_info(&info)?;
     let mut report = plan_from_snapshot(config, &migrations, &snapshot)?;
+    report.target_fingerprint = target_fingerprint(config, &info);
     if config.config.target.driver == "postgres" {
         report.warnings.push(
-            "PostgreSQL planning is read-only and does not initialize metadata; up/down writes require metadata format 5 and a non-production target"
+            "PostgreSQL planning is read-only and does not initialize metadata; up/down writes require metadata format 5 and explicit approval when the target environment is production"
                 .to_owned(),
         );
     }
@@ -3308,11 +3453,13 @@ pub(crate) async fn runner_preflight(
     if action == RunnerAction::Validate {
         let snapshot = MetadataSnapshot::default();
         let mut report = plan_from_snapshot(config, &migrations, &snapshot)?;
+        report.target_fingerprint = configured_target_fingerprint(config);
         report.plan_hash = runner_operation_hash(&report.plan_hash, "validate", 0);
+        report.approval_plan_hash = report.plan_hash.clone();
         return Ok(RunnerPreflight {
             manifest_fingerprint: manifest_hash(&migrations),
             plan_hash: report.plan_hash.clone(),
-            target_fingerprint: configured_target_fingerprint(config),
+            target_fingerprint: report.target_fingerprint.clone(),
             report,
         });
     }
@@ -3327,7 +3474,7 @@ pub(crate) async fn runner_preflight(
         RunnerAction::History => ("history", 0),
         RunnerAction::Doctor => ("doctor", 0),
         RunnerAction::Up => ("up", 0),
-        RunnerAction::Down { steps } => {
+        RunnerAction::PlanDown { steps } | RunnerAction::Down { steps } => {
             if steps == 0 {
                 return Err(DbmError::Configuration(
                     "down steps must be greater than zero".to_owned(),
@@ -3396,13 +3543,24 @@ pub(crate) async fn runner_preflight(
         }
     };
 
-    if !matches!(action, RunnerAction::Plan) {
+    report.target_fingerprint = target_fingerprint(config, &info);
+    if matches!(action, RunnerAction::PlanDown { .. }) {
+        report.plan_hash = down_approval_hash(&report.plan_hash, steps);
+        report.approval_plan_hash = report.plan_hash.clone();
+    } else if matches!(action, RunnerAction::Plan) {
+        report.approval_plan_hash = report.plan_hash.clone();
+    } else {
+        if direction == "down" {
+            report.approval_plan_hash = down_approval_hash(&report.plan_hash, steps);
+        } else {
+            report.approval_plan_hash = report.plan_hash.clone();
+        }
         report.plan_hash = runner_operation_hash(&report.plan_hash, direction, steps);
     }
     Ok(RunnerPreflight {
         manifest_fingerprint: manifest_hash(&migrations),
         plan_hash: report.plan_hash.clone(),
-        target_fingerprint: target_fingerprint(config, &info),
+        target_fingerprint: report.target_fingerprint.clone(),
         report,
     })
 }
@@ -3469,7 +3627,15 @@ pub async fn up_with_registry_async(
     config: &LoadedConfig,
     registry: &MigrationRegistry,
 ) -> Result<ExecutionReport> {
-    execute_with_adapter(config, "up", 0, Some(registry)).await
+    execute_with_adapter(config, "up", 0, Some(registry), None).await
+}
+
+pub(crate) async fn up_with_registry_authorized_async(
+    config: &LoadedConfig,
+    registry: &MigrationRegistry,
+    authorization: Option<&ProductionAuthorization>,
+) -> Result<ExecutionReport> {
+    execute_with_adapter(config, "up", 0, Some(registry), authorization).await
 }
 
 /// Rolls back the complete selected filesystem/registry plan through the shared engine.
@@ -3478,7 +3644,87 @@ pub async fn down_with_registry_async(
     registry: &MigrationRegistry,
     steps: usize,
 ) -> Result<ExecutionReport> {
-    execute_with_adapter(config, "down", steps, Some(registry)).await
+    execute_with_adapter(config, "down", steps, Some(registry), None).await
+}
+
+pub(crate) async fn down_with_registry_authorized_async(
+    config: &LoadedConfig,
+    registry: &MigrationRegistry,
+    steps: usize,
+    authorization: Option<&ProductionAuthorization>,
+) -> Result<ExecutionReport> {
+    execute_with_adapter(config, "down", steps, Some(registry), authorization).await
+}
+
+fn with_down_plan(
+    migrations: &[Migration],
+    snapshot: &MetadataSnapshot,
+    steps: usize,
+    mut report: PlanReport,
+) -> Result<PlanReport> {
+    if steps == 0 {
+        return Err(DbmError::Configuration(
+            "down steps must be greater than zero".to_owned(),
+        ));
+    }
+    let entries = build_status_entries(migrations, snapshot)?;
+    reject_invalid_status(&entries)?;
+    let mut applied: Vec<&AppliedMigration> = snapshot
+        .applied
+        .iter()
+        .filter(|migration| migration.kind == "versioned")
+        .collect();
+    applied.sort_by_key(|migration| Reverse(migration.apply_order));
+    if applied.is_empty() {
+        report.operations.clear();
+        report.status = "no_changes";
+    } else if steps > applied.len() {
+        return Err(DbmError::Configuration(format!(
+            "requested {steps} rollback step(s), but only {} migration(s) are applied",
+            applied.len()
+        )));
+    } else {
+        let by_version: BTreeMap<&str, &Migration> = migrations
+            .iter()
+            .filter(|migration| migration.kind == crate::migration::MigrationKind::Versioned)
+            .map(|migration| (migration.identity.version.as_str(), migration))
+            .collect();
+        let mut operations = Vec::with_capacity(steps);
+        for applied_migration in applied.into_iter().take(steps) {
+            let migration = by_version
+                .get(applied_migration.version.as_str())
+                .copied()
+                .ok_or_else(|| {
+                    DbmError::Diverged(format!(
+                        "source for applied migration {} is missing",
+                        applied_migration.version
+                    ))
+                })?;
+            if migration.down_sql.is_none() {
+                return Err(DbmError::Safety(format!(
+                    "migration {} is irreversible because it has no down section",
+                    migration.identity.version
+                )));
+            }
+            operations.push(PlanOperation {
+                migration_id: migration.identity.version.clone(),
+                kind: migration.kind,
+                filename: migration.filename.clone(),
+                direction: "down",
+                transaction: match migration.transaction {
+                    TransactionPolicy::Auto | TransactionPolicy::Always => "supported",
+                    TransactionPolicy::Never => "unsupported",
+                },
+                risk_level: "unknown",
+                capability_status: "supported",
+            });
+        }
+        report.operations = operations;
+        report.status = "ready";
+    }
+    report.plan_hash = down_approval_hash(&report.plan_hash, steps);
+    report.approval_plan_hash = report.plan_hash.clone();
+    Ok(report)
 }
 
 fn plan_from_snapshot(
@@ -3530,6 +3776,8 @@ fn plan_from_snapshot(
         } else {
             "ready"
         },
+        approval_plan_hash: plan_hash.clone(),
+        target_fingerprint: String::new(),
         plan_hash,
         read_only: true,
         operations,
@@ -4654,13 +4902,140 @@ fn begin_immediate(connection: &mut Connection) -> Result<GuardedSqliteTransacti
     })
 }
 
-pub(crate) fn require_mutation_environment(config: &LoadedConfig) -> Result<()> {
-    match config.config.target.environment {
-        Environment::Development | Environment::Test => Ok(()),
-        Environment::Production => Err(DbmError::Safety(
-            "production targets are intentionally disabled in this increment".to_owned(),
+pub(crate) fn require_mutation_environment(
+    config: &LoadedConfig,
+    authorization: Option<&ProductionAuthorization>,
+) -> Result<()> {
+    match (config.config.target.environment, authorization) {
+        (Environment::Development | Environment::Test, None) => Ok(()),
+        (Environment::Development | Environment::Test, Some(_)) => Err(DbmError::Safety(
+            "production approval flags are accepted only when the target environment is production"
+                .to_owned(),
         )),
+        (Environment::Production, None) => Err(DbmError::Safety(
+            "production mutations require --approve-plan and --approve-target from the current read-only plan"
+                .to_owned(),
+        )),
+        (Environment::Production, Some(authorization)) => {
+            validate_approval_digest("plan", &authorization.plan_hash)?;
+            validate_approval_digest("target", &authorization.target_fingerprint)?;
+            Ok(())
+        }
     }
+}
+
+pub(crate) fn require_production_target(
+    config: &LoadedConfig,
+    approved_target: Option<&str>,
+) -> Result<()> {
+    match (config.config.target.environment, approved_target) {
+        (Environment::Development | Environment::Test, None) => Ok(()),
+        (Environment::Development | Environment::Test, Some(_)) => Err(DbmError::Safety(
+            "production approval flags are accepted only when the target environment is production"
+                .to_owned(),
+        )),
+        (Environment::Production, None) => Err(DbmError::Safety(
+            "production mutations require --approve-target from the current read-only plan"
+                .to_owned(),
+        )),
+        (Environment::Production, Some(approved_target)) => {
+            validate_approval_digest("target", approved_target)
+        }
+    }
+}
+
+pub(crate) fn bind_production_approval(
+    config: &LoadedConfig,
+    authorization: Option<&ProductionAuthorization>,
+    plan_hash: &str,
+    target_fingerprint: &str,
+) -> Result<()> {
+    if config.config.target.environment != Environment::Production {
+        return Ok(());
+    }
+    let Some(authorization) = authorization else {
+        return Err(DbmError::Safety(
+            "production mutations require --approve-plan and --approve-target from the current read-only plan"
+                .to_owned(),
+        ));
+    };
+    if authorization.plan_hash != plan_hash
+        || authorization.target_fingerprint != target_fingerprint
+    {
+        return Err(DbmError::Safety(
+            "approved plan or target fingerprint does not match the current read-only plan; rerun plan and approve the new values"
+                .to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn bind_production_target(
+    config: &LoadedConfig,
+    approved_target: Option<&str>,
+    target_fingerprint: &str,
+) -> Result<()> {
+    if config.config.target.environment != Environment::Production {
+        return Ok(());
+    }
+    if approved_target != Some(target_fingerprint) {
+        return Err(DbmError::Safety(
+            "approved target fingerprint does not match the current read-only plan; rerun plan and approve the new value"
+                .to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn bind_production_target_info(
+    config: &LoadedConfig,
+    approved_target: Option<&str>,
+    info: &database::DatabaseInfo,
+) -> Result<()> {
+    bind_production_target(config, approved_target, &target_fingerprint(config, info))
+}
+
+fn validate_approval_digest(label: &str, value: &str) -> Result<()> {
+    let Some(digest) = value.strip_prefix("sha256:") else {
+        return Err(DbmError::Configuration(format!(
+            "approved {label} fingerprint must be a sha256 digest from the current read-only plan"
+        )));
+    };
+    if digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Ok(());
+    }
+    Err(DbmError::Configuration(format!(
+        "approved {label} fingerprint must be a sha256 digest from the current read-only plan"
+    )))
+}
+
+pub(crate) fn sqlite_target_fingerprint(config: &LoadedConfig) -> Result<String> {
+    let path = config.sqlite_database_path()?;
+    let server_version = if let Some(connection) = open_readonly(config)? {
+        connection.query_row("SELECT sqlite_version()", [], |row| row.get(0))?
+    } else {
+        "uninitialized".to_owned()
+    };
+    let info = database::DatabaseInfo {
+        dialect: "sqlite",
+        server_version,
+        database: None,
+        schema: Some("main".to_owned()),
+        target_identity: Some(path.display().to_string()),
+        session_id: None,
+    };
+    Ok(target_fingerprint(config, &info))
+}
+
+fn down_approval_hash(base_plan_hash: &str, steps: usize) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"dbm-down-approval-v1\0");
+    let step_count = steps.to_string();
+    for value in [base_plan_hash, step_count.as_str()] {
+        hasher.update((value.len() as u64).to_be_bytes());
+        hasher.update(value.as_bytes());
+    }
+    format!("sha256:{}", hex_digest(hasher.finalize().as_slice()))
 }
 
 fn manifest_hash(migrations: &[Migration]) -> String {
@@ -4777,11 +5152,12 @@ mod tests {
     use std::fs;
 
     use super::{
-        MigrationOperation, ReconcileReport, ReconcileRequest, build_doctor_steps, doctor,
-        doctor_async, down, down_async, history, history_async, manifest_hash, plan, plan_async,
-        plan_from_snapshot, plan_hash, reconcile as engine_reconcile, reconcile_async,
-        run_adapter_migration, split_sql_statements_for_dialect, sql_hash, status, status_async,
-        up, up_async, validate,
+        MigrationOperation, ProductionAuthorization, ReconcileReport, ReconcileRequest,
+        build_doctor_steps, doctor, doctor_async, down, down_async, down_with_authorization,
+        history, history_async, manifest_hash, plan, plan_async, plan_down, plan_from_snapshot,
+        plan_hash, reconcile as engine_reconcile, reconcile_async, run_adapter_migration,
+        split_sql_statements_for_dialect, sql_hash, status, status_async, up, up_async,
+        up_with_authorization, validate,
     };
     use crate::config::{self, LoadedConfig};
     use crate::database::{self, SessionIntent};
@@ -4897,6 +5273,7 @@ mod tests {
                 reason: "verified transactional state",
                 actor: "operator",
                 approved,
+                approved_target: None,
             },
         )
     }
@@ -5546,6 +5923,7 @@ mod tests {
                 reason: "restore the source and explicitly record the observed absence of DDL",
                 actor: "integration-test",
                 approved: true,
+                approved_target: None,
             },
         )
         .await
@@ -6557,6 +6935,7 @@ mod tests {
                 reason: "verify catalog state conflicts are rejected before repair",
                 actor: "integration-test",
                 approved: true,
+                approved_target: None,
             },
         )
         .await
@@ -6601,6 +6980,7 @@ mod tests {
                 reason: "verified the failed concurrent index is absent",
                 actor: "integration-test",
                 approved: true,
+                approved_target: None,
             },
         )
         .await
@@ -6992,6 +7372,98 @@ mod tests {
         let mut production_config = config.clone();
         production_config.config.target.environment = crate::config::Environment::Production;
         assert!(matches!(up(&production_config), Err(DbmError::Safety(_))));
+    }
+
+    #[test]
+    fn production_writes_require_the_current_plan_and_target() {
+        let (_directory, config) = setup();
+        write_migration(
+            &config,
+            "20261021162643981234_create_items.sql",
+            "-- dbm:up\nCREATE TABLE items (id INTEGER);\n-- dbm:down\nDROP TABLE items;\n",
+        );
+        let database_path = config.sqlite_database_path().expect("sqlite path");
+        let dummy = ProductionAuthorization {
+            plan_hash: format!("sha256:{}", "ab".repeat(32)),
+            target_fingerprint: format!("sha256:{}", "cd".repeat(32)),
+        };
+        let development = up_with_authorization(&config, &dummy);
+        assert!(
+            matches!(development, Err(DbmError::Safety(_))),
+            "development must reject production approval flags"
+        );
+        let mut test_config = config.clone();
+        test_config.config.target.environment = crate::config::Environment::Test;
+        let test_environment = up_with_authorization(&test_config, &dummy);
+        assert!(matches!(test_environment, Err(DbmError::Safety(_))));
+        assert!(!database_path.exists());
+
+        let mut production = config.clone();
+        production.config.target.environment = crate::config::Environment::Production;
+        let missing = up(&production);
+        assert!(matches!(missing, Err(DbmError::Safety(_))));
+        assert!(!database_path.exists());
+
+        let current = plan(&production).expect("read-only production plan");
+        assert_eq!(current.approval_plan_hash, current.plan_hash);
+        assert!(!current.target_fingerprint.is_empty());
+        assert!(!database_path.exists());
+
+        let wrong_plan = ProductionAuthorization {
+            plan_hash: dummy.plan_hash.clone(),
+            target_fingerprint: current.target_fingerprint.clone(),
+        };
+        assert!(matches!(
+            up_with_authorization(&production, &wrong_plan),
+            Err(DbmError::Safety(_))
+        ));
+        let wrong_target = ProductionAuthorization {
+            plan_hash: current.plan_hash.clone(),
+            target_fingerprint: dummy.target_fingerprint.clone(),
+        };
+        assert!(matches!(
+            up_with_authorization(&production, &wrong_target),
+            Err(DbmError::Safety(_))
+        ));
+        assert!(!database_path.exists());
+
+        let approved = ProductionAuthorization {
+            plan_hash: current.plan_hash.clone(),
+            target_fingerprint: current.target_fingerprint.clone(),
+        };
+        let applied =
+            up_with_authorization(&production, &approved).expect("approved production up");
+        assert_eq!(applied.status, "succeeded");
+        assert!(database_path.is_file());
+
+        let rollback = plan_down(&production, 1).expect("read-only production rollback plan");
+        assert_ne!(rollback.plan_hash, current.plan_hash);
+        let up_hash_cannot_roll_back = ProductionAuthorization {
+            plan_hash: current.plan_hash.clone(),
+            target_fingerprint: rollback.target_fingerprint.clone(),
+        };
+        assert!(matches!(
+            down_with_authorization(&production, 1, &up_hash_cannot_roll_back),
+            Err(DbmError::Safety(_))
+        ));
+        let connection = rusqlite::Connection::open(database_path).expect("open approved database");
+        let table_exists: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'items')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("items table remains after rejected rollback");
+        assert!(table_exists);
+        drop(connection);
+
+        let approved_rollback = ProductionAuthorization {
+            plan_hash: rollback.plan_hash,
+            target_fingerprint: rollback.target_fingerprint,
+        };
+        let reverted =
+            down_with_authorization(&production, 1, &approved_rollback).expect("approved rollback");
+        assert_eq!(reverted.migrations.len(), 1);
     }
 
     #[test]

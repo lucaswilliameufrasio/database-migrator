@@ -14,7 +14,7 @@ use serde_json::Value;
 use tempfile::{Builder as TempDirBuilder, TempDir};
 
 use crate::async_runtime::run_blocking;
-use crate::config::LoadedConfig;
+use crate::config::{Environment, LoadedConfig};
 use crate::engine::{self, RunnerAction};
 use crate::error::{DbmError, Result};
 use crate::registry::MigrationRegistry;
@@ -28,6 +28,7 @@ const HANDSHAKE_TIMEOUT_SECONDS: u64 = 30;
 pub(crate) enum RunnerOperation {
     Validate,
     Plan,
+    PlanDown { steps: usize },
     Status,
     History,
     Doctor,
@@ -58,7 +59,7 @@ impl RunnerOperation {
     fn action(self) -> WireAction {
         match self {
             Self::Validate => WireAction::Validate,
-            Self::Plan => WireAction::Plan,
+            Self::Plan | Self::PlanDown { .. } => WireAction::Plan,
             Self::Status => WireAction::Status,
             Self::History => WireAction::History,
             Self::Doctor => WireAction::Doctor,
@@ -69,7 +70,7 @@ impl RunnerOperation {
 
     fn steps(self) -> Option<usize> {
         match self {
-            Self::Down { steps } => Some(steps),
+            Self::PlanDown { steps } | Self::Down { steps } => Some(steps),
             Self::Validate
             | Self::Plan
             | Self::Status
@@ -83,6 +84,7 @@ impl RunnerOperation {
         match self {
             Self::Validate => RunnerAction::Validate,
             Self::Plan => RunnerAction::Plan,
+            Self::PlanDown { steps } => RunnerAction::PlanDown { steps },
             Self::Status => RunnerAction::Status,
             Self::History => RunnerAction::History,
             Self::Doctor => RunnerAction::Doctor,
@@ -94,14 +96,19 @@ impl RunnerOperation {
     fn is_read_only(self) -> bool {
         matches!(
             self,
-            Self::Validate | Self::Plan | Self::Status | Self::History | Self::Doctor
+            Self::Validate
+                | Self::Plan
+                | Self::PlanDown { .. }
+                | Self::Status
+                | Self::History
+                | Self::Doctor
         )
     }
 
     fn report_command(self) -> &'static str {
         match self {
             Self::Validate => "validate",
-            Self::Plan => "plan",
+            Self::Plan | Self::PlanDown { .. } => "plan",
             Self::Status => "status",
             Self::History => "history",
             Self::Doctor => "doctor",
@@ -137,6 +144,10 @@ struct ExecuteRequest {
     manifest_fingerprint: String,
     plan_hash: String,
     target_fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    approved_plan_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    approved_target_fingerprint: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -253,7 +264,10 @@ where
     };
     write_frame(output, &ready)?;
 
-    if matches!(operation, RunnerOperation::Plan) {
+    if matches!(
+        operation,
+        RunnerOperation::Plan | RunnerOperation::PlanDown { .. }
+    ) {
         return Ok(());
     }
     if operation.is_read_only() {
@@ -270,7 +284,10 @@ where
             RunnerOperation::Doctor => engine::doctor_with_registry_async(&config, registry)
                 .await
                 .and_then(|report| serde_json::to_value(report).map_err(DbmError::from)),
-            RunnerOperation::Plan | RunnerOperation::Up | RunnerOperation::Down { .. } => {
+            RunnerOperation::Plan
+            | RunnerOperation::PlanDown { .. }
+            | RunnerOperation::Up
+            | RunnerOperation::Down { .. } => {
                 return Err(protocol_error("runner read-only operation is inconsistent"));
             }
         };
@@ -363,18 +380,36 @@ where
         write_error(output, "execute_validation", &error)?;
         return Ok(());
     }
+    let authorization =
+        match production_execute_authorization(config.config.target.environment, &execute, &latest)
+        {
+            Ok(authorization) => authorization,
+            Err(error) => {
+                write_error(output, "execute_validation", &error)?;
+                return Ok(());
+            }
+        };
 
     let execution = match operation {
-        RunnerOperation::Plan => return Ok(()),
+        RunnerOperation::Plan | RunnerOperation::PlanDown { .. } => return Ok(()),
         RunnerOperation::Validate
         | RunnerOperation::Status
         | RunnerOperation::History
         | RunnerOperation::Doctor => {
             return Err(protocol_error("runner mutation operation is inconsistent"));
         }
-        RunnerOperation::Up => engine::up_with_registry_async(&config, registry).await,
+        RunnerOperation::Up => {
+            engine::up_with_registry_authorized_async(&config, registry, authorization.as_ref())
+                .await
+        }
         RunnerOperation::Down { steps } => {
-            engine::down_with_registry_async(&config, registry, steps).await
+            engine::down_with_registry_authorized_async(
+                &config,
+                registry,
+                steps,
+                authorization.as_ref(),
+            )
+            .await
         }
     };
     let execution = match execution {
@@ -398,17 +433,20 @@ pub(crate) async fn invoke(
     config_path: &Path,
     config: &LoadedConfig,
     operation: RunnerOperation,
+    authorization: Option<engine::ProductionAuthorization>,
 ) -> Result<RunnerOutput> {
     let config_path = config_path.to_path_buf();
     let config = config.clone();
-    run_blocking(move || invoke_blocking(&config_path, &config, operation)).await
+    run_blocking(move || invoke_blocking(&config_path, &config, operation, authorization)).await
 }
 
 fn invoke_blocking(
     config_path: &Path,
     config: &LoadedConfig,
     operation: RunnerOperation,
+    authorization: Option<engine::ProductionAuthorization>,
 ) -> Result<RunnerOutput> {
+    reject_misplaced_approval(config, operation, authorization.as_ref())?;
     let (canonical_config, project_root, runner_path) = resolve_runner_paths(config_path, config)?;
     let runner_snapshot = snapshot_runner(&runner_path)?;
     let runner_fingerprint = runner_snapshot.fingerprint.clone();
@@ -465,7 +503,10 @@ fn invoke_blocking(
         return Err(error);
     }
 
-    if matches!(operation, RunnerOperation::Plan) {
+    if matches!(
+        operation,
+        RunnerOperation::Plan | RunnerOperation::PlanDown { .. }
+    ) {
         drop(stdin);
         let status = wait_child(&mut child, timeout)?;
         ensure_successful_exit(status, false)?;
@@ -504,6 +545,12 @@ fn invoke_blocking(
         return Ok(RunnerOutput::ReadOnly(complete.report));
     }
 
+    if let Some(authorization) = authorization.as_ref()
+        && let Err(error) = validate_operator_approval(authorization, &ready)
+    {
+        stop_child(&mut child);
+        return Err(error);
+    }
     let execute = ExecuteRequest {
         kind: "execute".to_owned(),
         protocol_version: RUNNER_PROTOCOL_VERSION,
@@ -514,6 +561,12 @@ fn invoke_blocking(
         manifest_fingerprint: ready.manifest_fingerprint.clone(),
         plan_hash: ready.plan_hash.clone(),
         target_fingerprint: ready.target_fingerprint.clone(),
+        approved_plan_hash: authorization
+            .as_ref()
+            .map(|authorization| authorization.plan_hash.clone()),
+        approved_target_fingerprint: authorization
+            .as_ref()
+            .map(|authorization| authorization.target_fingerprint.clone()),
     };
     if let Err(error) = write_frame(&mut stdin, &execute) {
         stop_child(&mut child);
@@ -892,6 +945,98 @@ fn validate_hello(request: &HelloRequest, runner_fingerprint: &str) -> Result<()
     validate_action_shape(request.action, request.down_steps)
 }
 
+fn reject_misplaced_approval(
+    config: &LoadedConfig,
+    operation: RunnerOperation,
+    authorization: Option<&engine::ProductionAuthorization>,
+) -> Result<()> {
+    if operation.is_read_only() {
+        if authorization.is_some() {
+            return Err(DbmError::Configuration(
+                "production approval flags apply only to up and down".to_owned(),
+            ));
+        }
+        return Ok(());
+    }
+    match (config.config.target.environment, authorization) {
+        (Environment::Development | Environment::Test, None) => Ok(()),
+        (Environment::Development | Environment::Test, Some(_)) => Err(DbmError::Safety(
+            "production approval flags are accepted only when the target environment is production"
+                .to_owned(),
+        )),
+        (Environment::Production, None) => Err(DbmError::Safety(
+            "production mutations require --approve-plan and --approve-target from the current read-only plan"
+                .to_owned(),
+        )),
+        (Environment::Production, Some(_)) => Ok(()),
+    }
+}
+
+fn validate_operator_approval(
+    authorization: &engine::ProductionAuthorization,
+    ready: &ReadyResponse,
+) -> Result<()> {
+    let approval_hash = ready
+        .report
+        .get("approval_plan_hash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| protocol_error("compiled runner plan is missing its approval hash"))?;
+    if authorization.plan_hash != approval_hash
+        || authorization.target_fingerprint != ready.target_fingerprint
+    {
+        return Err(DbmError::Safety(
+            "approved plan or target fingerprint does not match the current read-only plan; rerun plan and approve the new values"
+                .to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn production_execute_authorization(
+    environment: Environment,
+    execute: &ExecuteRequest,
+    preflight: &engine::RunnerPreflight,
+) -> Result<Option<engine::ProductionAuthorization>> {
+    let supplied =
+        execute.approved_plan_hash.is_some() || execute.approved_target_fingerprint.is_some();
+    match environment {
+        Environment::Development | Environment::Test => {
+            if supplied {
+                return Err(DbmError::Safety(
+                    "production approval flags are accepted only when the target environment is production"
+                        .to_owned(),
+                ));
+            }
+            Ok(None)
+        }
+        Environment::Production => {
+            match (
+                execute.approved_plan_hash.clone(),
+                execute.approved_target_fingerprint.clone(),
+            ) {
+                (Some(plan_hash), Some(target_fingerprint)) => {
+                    if plan_hash != preflight.report.approval_plan_hash
+                        || target_fingerprint != preflight.target_fingerprint
+                    {
+                        return Err(DbmError::Safety(
+                            "approved plan or target fingerprint does not match the current read-only plan; rerun plan and approve the new values"
+                                .to_owned(),
+                        ));
+                    }
+                    Ok(Some(engine::ProductionAuthorization {
+                        plan_hash,
+                        target_fingerprint,
+                    }))
+                }
+                _ => Err(DbmError::Safety(
+                    "production mutations require --approve-plan and --approve-target from the current read-only plan"
+                        .to_owned(),
+                )),
+            }
+        }
+    }
+}
+
 fn validate_execute(
     request: &ExecuteRequest,
     operation: RunnerOperation,
@@ -1029,6 +1174,10 @@ fn validate_action_shape(action: WireAction, down_steps: Option<usize>) -> Resul
     match (action, down_steps) {
         (WireAction::Down, Some(steps)) if steps > 0 => Ok(()),
         (WireAction::Down, _) => Err(protocol_error("down action requires positive down_steps")),
+        (WireAction::Plan, Some(0)) => Err(protocol_error(
+            "plan down action requires positive down_steps",
+        )),
+        (WireAction::Plan, Some(_)) => Ok(()),
         (
             WireAction::Validate
             | WireAction::Plan
@@ -1040,13 +1189,14 @@ fn validate_action_shape(action: WireAction, down_steps: Option<usize>) -> Resul
         ) => Ok(()),
         (
             WireAction::Validate
-            | WireAction::Plan
             | WireAction::Status
             | WireAction::History
             | WireAction::Doctor
             | WireAction::Up,
             Some(_),
-        ) => Err(protocol_error("only down action accepts down_steps")),
+        ) => Err(protocol_error(
+            "only down and plan actions accept down_steps",
+        )),
     }
 }
 
@@ -1055,6 +1205,7 @@ fn operation_from_wire(action: WireAction, down_steps: Option<usize>) -> Result<
     match (action, down_steps) {
         (WireAction::Validate, None) => Ok(RunnerOperation::Validate),
         (WireAction::Plan, None) => Ok(RunnerOperation::Plan),
+        (WireAction::Plan, Some(steps)) => Ok(RunnerOperation::PlanDown { steps }),
         (WireAction::Status, None) => Ok(RunnerOperation::Status),
         (WireAction::History, None) => Ok(RunnerOperation::History),
         (WireAction::Doctor, None) => Ok(RunnerOperation::Doctor),
@@ -1182,7 +1333,8 @@ mod tests {
 
     use super::{
         ExecuteRequest, MAX_FRAME_BYTES, RUNNER_PROTOCOL_VERSION, RunnerOperation, WireAction,
-        operation_from_wire, read_frame, snapshot_runner, validate_action_shape, validate_execute,
+        operation_from_wire, production_execute_authorization, read_frame, snapshot_runner,
+        validate_action_shape, validate_execute,
     };
 
     #[test]
@@ -1269,6 +1421,8 @@ mod tests {
                 namespace: "default".to_owned(),
                 status: "ready",
                 plan_hash: "sha256:plan".to_owned(),
+                approval_plan_hash: "sha256:approval".to_owned(),
+                target_fingerprint: "sha256:target".to_owned(),
                 read_only: true,
                 operations: Vec::new(),
                 warnings: Vec::new(),
@@ -1285,6 +1439,8 @@ mod tests {
             manifest_fingerprint: preflight.manifest_fingerprint.clone(),
             plan_hash: preflight.plan_hash.clone(),
             target_fingerprint: preflight.target_fingerprint.clone(),
+            approved_plan_hash: None,
+            approved_target_fingerprint: None,
         };
         assert!(
             validate_execute(&baseline, RunnerOperation::Up, &preflight, "sha256:runner").is_ok()
@@ -1306,6 +1462,8 @@ mod tests {
                 manifest_fingerprint: baseline.manifest_fingerprint.clone(),
                 plan_hash: baseline.plan_hash.clone(),
                 target_fingerprint: baseline.target_fingerprint.clone(),
+                approved_plan_hash: None,
+                approved_target_fingerprint: None,
             };
             match fingerprint {
                 "runner_fingerprint" => {
@@ -1340,5 +1498,121 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn plan_down_uses_positive_steps_on_the_plan_action() {
+        assert!(validate_action_shape(WireAction::Plan, Some(0)).is_err());
+        assert!(validate_action_shape(WireAction::Plan, None).is_ok());
+        assert!(matches!(
+            operation_from_wire(WireAction::Plan, Some(2)).expect("valid plan down request"),
+            RunnerOperation::PlanDown { steps: 2 }
+        ));
+        assert!(matches!(
+            operation_from_wire(WireAction::Plan, None).expect("valid plan request"),
+            RunnerOperation::Plan
+        ));
+    }
+
+    #[test]
+    fn execute_request_keeps_approval_fields_optional() {
+        let legacy = r#"{
+            "kind": "execute",
+            "protocol_version": 2,
+            "runner_fingerprint": "sha256:runner",
+            "namespace": "default",
+            "action": "up",
+            "down_steps": null,
+            "manifest_fingerprint": "sha256:manifest",
+            "plan_hash": "sha256:plan",
+            "target_fingerprint": "sha256:target"
+        }"#;
+        let request: ExecuteRequest = serde_json::from_str(legacy).expect("legacy execute frame");
+        assert!(request.approved_plan_hash.is_none());
+        assert!(request.approved_target_fingerprint.is_none());
+    }
+
+    #[test]
+    fn production_execute_requires_hashes_that_match_the_approval_plan() {
+        let preflight = engine::RunnerPreflight {
+            manifest_fingerprint: "sha256:manifest".to_owned(),
+            plan_hash: "sha256:runner-operation".to_owned(),
+            target_fingerprint: "sha256:target".to_owned(),
+            report: engine::PlanReport {
+                schema_version: "1.0",
+                command: "plan",
+                target: "sqlite:test.db".to_owned(),
+                namespace: "default".to_owned(),
+                status: "ready",
+                plan_hash: "sha256:runner-operation".to_owned(),
+                approval_plan_hash: "sha256:approval".to_owned(),
+                target_fingerprint: "sha256:target".to_owned(),
+                read_only: true,
+                operations: Vec::new(),
+                warnings: Vec::new(),
+                errors: Vec::new(),
+            },
+        };
+        let mut request = ExecuteRequest {
+            kind: "execute".to_owned(),
+            protocol_version: RUNNER_PROTOCOL_VERSION,
+            runner_fingerprint: "sha256:runner".to_owned(),
+            namespace: "default".to_owned(),
+            action: WireAction::Up,
+            down_steps: None,
+            manifest_fingerprint: preflight.manifest_fingerprint.clone(),
+            plan_hash: preflight.plan_hash.clone(),
+            target_fingerprint: preflight.target_fingerprint.clone(),
+            approved_plan_hash: None,
+            approved_target_fingerprint: None,
+        };
+        assert!(
+            production_execute_authorization(
+                crate::config::Environment::Development,
+                &request,
+                &preflight
+            )
+            .expect("development execute omits approval")
+            .is_none()
+        );
+        request.approved_plan_hash = Some("sha256:approval".to_owned());
+        assert!(
+            production_execute_authorization(
+                crate::config::Environment::Test,
+                &request,
+                &preflight
+            )
+            .is_err()
+        );
+        request.approved_plan_hash = None;
+        assert!(
+            production_execute_authorization(
+                crate::config::Environment::Production,
+                &request,
+                &preflight
+            )
+            .is_err()
+        );
+        request.approved_plan_hash = Some(preflight.plan_hash.clone());
+        request.approved_target_fingerprint = Some(preflight.target_fingerprint.clone());
+        assert!(
+            production_execute_authorization(
+                crate::config::Environment::Production,
+                &request,
+                &preflight
+            )
+            .is_err(),
+            "the rewritten runner operation hash must not authorize production"
+        );
+        request.approved_plan_hash = Some(preflight.report.approval_plan_hash.clone());
+        let authorization = production_execute_authorization(
+            crate::config::Environment::Production,
+            &request,
+            &preflight,
+        )
+        .expect("matching approval");
+        let authorization = authorization.expect("production authorization");
+        assert_eq!(authorization.plan_hash, "sha256:approval");
+        assert_eq!(authorization.target_fingerprint, "sha256:target");
     }
 }

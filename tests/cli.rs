@@ -6108,3 +6108,156 @@ fn run_mysql_tls_validation(url_environment_variable: &str, ca_environment_varia
         "MySQL/MariaDB TLS must reject a server certificate with a hostname mismatch"
     );
 }
+
+#[test]
+fn cli_production_up_and_down_require_the_current_plan_and_target() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let initialized = run(directory.path(), &["init"]);
+    assert!(initialized.status.success());
+    fs::write(
+        directory
+            .path()
+            .join("migrations/versioned/20261021162643981234_create_items.sql"),
+        "-- dbm:up\nCREATE TABLE items (id INTEGER);\n-- dbm:down\nDROP TABLE items;\n",
+    )
+    .expect("write migration");
+    let config_path = directory.path().join("dbm.toml");
+    let config = fs::read_to_string(&config_path).expect("read generated config");
+    assert!(config.contains("environment = \"development\""));
+    fs::write(
+        &config_path,
+        config.replace(
+            "environment = \"development\"",
+            "environment = \"production\"",
+        ),
+    )
+    .expect("mark the target as production");
+
+    let planned = run(directory.path(), &["--format", "json", "plan"]);
+    assert!(
+        planned.status.success(),
+        "production plan failed: {}",
+        String::from_utf8_lossy(&planned.stderr)
+    );
+    let plan = json(&planned);
+    let plan_hash = plan["plan_hash"].as_str().expect("plan hash").to_owned();
+    let target_fingerprint = plan["target_fingerprint"]
+        .as_str()
+        .expect("target fingerprint")
+        .to_owned();
+    assert_eq!(plan["approval_plan_hash"], plan_hash);
+    assert!(!directory.path().join("dbm.sqlite").exists());
+
+    let text_plan = run(directory.path(), &["plan"]);
+    assert!(text_plan.status.success());
+    let text = String::from_utf8_lossy(&text_plan.stdout);
+    assert!(text.contains(&format!("Plan {plan_hash}")));
+    assert!(text.contains(&format!("Target {target_fingerprint}")));
+
+    let blocked = run(directory.path(), &["--format", "json", "up"]);
+    assert_eq!(blocked.status.code(), Some(9));
+    assert_eq!(json(&blocked)["errors"][0]["code"], "SAFETY_BLOCKED");
+    assert!(!directory.path().join("dbm.sqlite").exists());
+
+    let one_flag = run(
+        directory.path(),
+        &["--format", "json", "up", "--approve-plan", &plan_hash],
+    );
+    assert_eq!(one_flag.status.code(), Some(2));
+    assert!(!directory.path().join("dbm.sqlite").exists());
+
+    let applied = run(
+        directory.path(),
+        &[
+            "--format",
+            "json",
+            "up",
+            "--approve-plan",
+            &plan_hash,
+            "--approve-target",
+            &target_fingerprint,
+        ],
+    );
+    assert!(
+        applied.status.success(),
+        "approved production up failed: {}",
+        String::from_utf8_lossy(&applied.stderr)
+    );
+    assert_eq!(json(&applied)["status"], "succeeded");
+    assert!(directory.path().join("dbm.sqlite").is_file());
+
+    let down_plan = run(
+        directory.path(),
+        &["--format", "json", "plan", "--down", "--steps", "1"],
+    );
+    assert!(
+        down_plan.status.success(),
+        "production rollback plan failed: {}",
+        String::from_utf8_lossy(&down_plan.stderr)
+    );
+    let down_json = json(&down_plan);
+    let down_hash = down_json["plan_hash"]
+        .as_str()
+        .expect("down approval hash")
+        .to_owned();
+    let down_target = down_json["target_fingerprint"]
+        .as_str()
+        .expect("down target fingerprint")
+        .to_owned();
+    assert_ne!(down_hash, plan_hash);
+    assert_eq!(down_json["approval_plan_hash"], down_hash);
+
+    let blocked_down = run(directory.path(), &["--format", "json", "down"]);
+    assert_eq!(blocked_down.status.code(), Some(9));
+    assert_eq!(json(&blocked_down)["errors"][0]["code"], "SAFETY_BLOCKED");
+
+    let up_hash_cannot_roll_back = run(
+        directory.path(),
+        &[
+            "--format",
+            "json",
+            "down",
+            "--approve-plan",
+            &plan_hash,
+            "--approve-target",
+            &down_target,
+        ],
+    );
+    assert_eq!(up_hash_cannot_roll_back.status.code(), Some(9));
+    let database = rusqlite::Connection::open(directory.path().join("dbm.sqlite"))
+        .expect("open database after rejected rollback");
+    let table_exists: bool = database
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'items')",
+            [],
+            |row| row.get(0),
+        )
+        .expect("items table remains");
+    assert!(table_exists);
+    drop(database);
+
+    let reverted = run(
+        directory.path(),
+        &[
+            "--format",
+            "json",
+            "down",
+            "--approve-plan",
+            &down_hash,
+            "--approve-target",
+            &down_target,
+        ],
+    );
+    assert!(
+        reverted.status.success(),
+        "approved production down failed: {}",
+        String::from_utf8_lossy(&reverted.stderr)
+    );
+    assert_eq!(
+        json(&reverted)["migrations"]
+            .as_array()
+            .expect("reverted")
+            .len(),
+        1
+    );
+}

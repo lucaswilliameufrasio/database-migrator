@@ -1786,6 +1786,28 @@ performance), verificando o harness corrigido nesse SHA. G11 continua aberto
 pelas pendências independentes de segurança e matriz, que ainda precisam ser
 resolvidas ou formalmente delimitadas.
 
+**Aprovação de mutações em produção — 2026-11-13:** `environment = production`
+deixa de recusar toda escrita. `up` e `down` exigem `--approve-plan` e
+`--approve-target` copiados do plano read-only corrente; o hash de `down`
+inclui a quantidade de passos, então a aprovação de `up` não autoriza rollback.
+Reconciliação, upgrade de metadata e import apply/adopt mantêm as aprovações
+próprias e, em produção, também exigem `--approve-target`. A comparação ocorre
+depois da leitura e antes da primeira abertura de escrita. A decisão está em
+`docs/adr/ADR-010-aprovacao-de-producao.md`. O README foi reduzido aos comandos
+e às linhas de versão já exercitadas. O gate local deste incremento passou:
+formatação, `git diff --check`, Clippy com `-D warnings`, build e os dois
+exemplos SQLite. `cargo test --workspace --all-features --locked` teve 160
+passed e 49 ignored na repetição completa. Na primeira tentativa, só
+`incompatible_runner_handshake_never_falls_back_to_partial_sql` falhou, sem
+imprimir a saída da CLI; a repetição isolada e a suíte completa seguinte
+passaram, e uma invocação manual do mesmo binário recusou o protocolo 999 com
+exit 13 sem criar o SQLite. Os testes opt-in de PostgreSQL, MySQL e MariaDB não
+rodaram. `scripts/supply-chain.sh` não foi repetido porque `Cargo.lock` não
+mudou. Isso não fecha G11 nem G12 e não autoriza tag ou publicação. O próximo
+passo é um projeto de exemplo com SQLite, PostgreSQL 18.6 e MariaDB 11.8.9,
+migrations com timestamp e ambientes `development` ou `test`. MySQL fica de fora
+desse exemplo.
+
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 
 **G12** — Tag estável com release notes, checksums assinados quando possível, binários homologados, changelog, upgrade guide, compatibilidade semver, matriz de testes publicada e exemplos de CI de deploy seguros.

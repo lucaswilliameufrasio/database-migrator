@@ -136,6 +136,7 @@ pub(crate) struct LegacyAdoptRequest<'a> {
     pub(crate) reason: &'a str,
     pub(crate) actor: &'a str,
     pub(crate) approved: bool,
+    pub(crate) approved_target: Option<&'a str>,
 }
 
 pub(crate) struct LegacyImportWrite<'a> {
@@ -487,9 +488,12 @@ pub(crate) fn apply_from_config(
     config: &LoadedConfig,
     tool: LegacyTool,
     approved_digest: &str,
+    approved_target: Option<&str>,
 ) -> Result<LegacyImportApplyReport> {
     require_sqlite_import(config)?;
-    crate::engine::require_mutation_environment(config)?;
+    crate::engine::require_production_target(config, approved_target)?;
+    let fingerprint = crate::engine::sqlite_target_fingerprint(config)?;
+    crate::engine::bind_production_target(config, approved_target, &fingerprint)?;
     validate_approved_digest(approved_digest)?;
 
     let mut connection = crate::storage::open_mutable(config)?;
@@ -667,23 +671,31 @@ pub(crate) async fn apply_async(
     config: &LoadedConfig,
     tool: LegacyTool,
     approved_digest: &str,
+    approved_target: Option<&str>,
 ) -> Result<LegacyImportApplyReport> {
     if config.config.target.driver == "sqlite" {
         let config = config.clone();
         let approved_digest = approved_digest.to_owned();
+        let approved_target = approved_target.map(str::to_owned);
         return crate::async_runtime::run_blocking(move || {
-            apply_from_config(&config, tool, &approved_digest)
+            apply_from_config(&config, tool, &approved_digest, approved_target.as_deref())
         })
         .await;
     }
     require_network_import(config)?;
-    crate::engine::require_mutation_environment(config)?;
+    crate::engine::require_production_target(config, approved_target)?;
     validate_approved_digest(approved_digest)?;
 
     let adapter = crate::database::adapter_for(config)?;
     let mut session = adapter
         .connect(config, crate::database::SessionIntent::ReadWrite)
         .await?;
+    if let Err(error) =
+        crate::engine::bind_production_target_info(config, approved_target, session.info())
+    {
+        let _ = session.close().await;
+        return Err(error);
+    }
     let result = async {
         session
             .acquire_lock(std::time::Duration::from_secs(
@@ -921,9 +933,12 @@ pub(crate) fn adopt_from_config(
         reason,
         actor,
         approved,
+        approved_target,
     } = request;
     require_sqlite_import(config)?;
-    crate::engine::require_mutation_environment(config)?;
+    crate::engine::require_production_target(config, approved_target)?;
+    let fingerprint = crate::engine::sqlite_target_fingerprint(config)?;
+    crate::engine::bind_production_target(config, approved_target, &fingerprint)?;
     if !approved {
         return Err(DbmError::Safety(
             "legacy adoption requires explicit --yes approval".to_owned(),
@@ -1092,6 +1107,7 @@ pub(crate) async fn adopt_async(
         let reason = request.reason.to_owned();
         let actor = request.actor.to_owned();
         let approved = request.approved;
+        let approved_target = request.approved_target.map(str::to_owned);
         return crate::async_runtime::run_blocking(move || {
             adopt_from_config(
                 &config,
@@ -1104,13 +1120,13 @@ pub(crate) async fn adopt_async(
                     reason: &reason,
                     actor: &actor,
                     approved,
+                    approved_target: approved_target.as_deref(),
                 },
             )
         })
         .await;
     }
     require_network_import(config)?;
-    crate::engine::require_mutation_environment(config)?;
     let LegacyAdoptRequest {
         tool,
         import_id,
@@ -1120,7 +1136,9 @@ pub(crate) async fn adopt_async(
         reason,
         actor,
         approved,
+        approved_target,
     } = request;
+    crate::engine::require_production_target(config, approved_target)?;
     if !approved {
         return Err(DbmError::Safety(
             "legacy adoption requires explicit --yes approval".to_owned(),
@@ -1146,6 +1164,12 @@ pub(crate) async fn adopt_async(
     let mut session = adapter
         .connect(config, crate::database::SessionIntent::ReadWrite)
         .await?;
+    if let Err(error) =
+        crate::engine::bind_production_target_info(config, approved_target, session.info())
+    {
+        let _ = session.close().await;
+        return Err(error);
+    }
     let result = async {
         session
             .acquire_lock(std::time::Duration::from_secs(

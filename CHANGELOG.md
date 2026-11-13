@@ -5,6 +5,16 @@ draft for the planned V1; no stable release has been published.
 
 ## Unreleased
 
+### Changed
+
+- `environment = production` can apply `up` and `down` when the operator passes
+  `--approve-plan` and `--approve-target` from the current read-only plan.
+  `dbm plan --down --steps N` prints the rollback approval hash. Development
+  and test targets stay unchanged and reject those flags. Reconciliation,
+  metadata upgrade, and legacy apply/adopt keep their existing approvals and
+  also require `--approve-target` in production. This does not close G11 or
+  G12 and does not authorize a tag or publication.
+
 ### Added
 
 - SQL migration engine and `dbm` CLI for SQLite, PostgreSQL, MySQL, and MariaDB.

@@ -2956,14 +2956,14 @@ mod tests {
             .await
             .expect("close pre-upgrade inspection session");
 
-        let preview = crate::engine::upgrade_metadata_async(&config, false)
+        let preview = crate::engine::upgrade_metadata_async(&config, false, None)
             .await
             .expect("preview explicit MySQL/MariaDB metadata upgrade");
         assert_eq!(preview.status, "requires_approval");
         assert!(preview.read_only);
         assert_eq!(preview.from_version, Some(3));
 
-        let report = crate::engine::upgrade_metadata_async(&config, true)
+        let report = crate::engine::upgrade_metadata_async(&config, true, None)
             .await
             .expect("upgrade MySQL/MariaDB metadata through the engine");
         assert_eq!(report.status, "upgraded");
@@ -3072,13 +3072,13 @@ mod tests {
             .await
             .expect("restore the v4 metadata format check");
 
-        let preview_v4 = crate::engine::upgrade_metadata_async(&config, false)
+        let preview_v4 = crate::engine::upgrade_metadata_async(&config, false, None)
             .await
             .expect("preview explicit v4-to-v5 metadata upgrade");
         assert_eq!(preview_v4.status, "requires_approval");
         assert!(preview_v4.read_only);
         assert_eq!(preview_v4.from_version, Some(4));
-        let report_v4 = crate::engine::upgrade_metadata_async(&config, true)
+        let report_v4 = crate::engine::upgrade_metadata_async(&config, true, None)
             .await
             .expect("upgrade format 4 metadata through the engine");
         assert_eq!(report_v4.status, "upgraded");
