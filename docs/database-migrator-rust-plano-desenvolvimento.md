@@ -1829,8 +1829,11 @@ substituído como rollback, mesmo quando a remoção e a recriação cabem entre
 duas leituras. A CTE da migration de teste passou de 1 milhão para 100 mil
 linhas; o trigger de 100 milhões no update `failed` permanece. Seis execuções
 focadas locais passaram, cada uma em cerca de 0,16 s, e o gate local completo
-passou (160 passed, 49 ignored; formatação, Clippy e build). Isso não fecha
-G11. A CI remota desta correção ainda não foi observada.
+passou (160 passed, 49 ignored; formatação, Clippy e build). O commit
+`544305d` passou os três jobs na CI
+[43372317594](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/43372317594):
+qualidade em 3m45s, supply-chain em 4m43s e performance informativa em 2m43s.
+Isso não fecha G11.
 
 **G11** — Sem duplicidade ou reaplicação indevida em cenários de kill/disconnect; fuzz scanner; docs de recuperação; performance baseline; SBOM; dependências auditadas; exemplos executáveis.
 

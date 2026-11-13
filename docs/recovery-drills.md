@@ -180,7 +180,11 @@ reduced from 1,000,000 rows to 100,000 so that transaction still ends inside
 the deadline on a slow runner. The 100,000,000-iteration failed-run trigger is
 unchanged. Six consecutive focused local runs passed, each in about 0.16
 seconds, and the full local gate passed afterward (160 passed, 49 ignored).
-Remote CI for this correction is not claimed yet. G11 remains open.
+Commit `544305ddc368f683fc97104d293b84d15f649d7d` then passed all three jobs in
+CI run
+[43372317594](https://github.com/lucaswilliameufrasio/database-migrator/actions/runs/43372317594):
+quality in 3m45s, supply-chain in 4m43s, and informational performance in
+2m43s. G11 remains open.
 
 **Supplemental complete opt-in suite on PostgreSQL 17.11 — 2026-11-08:** the
 45-test ignored workspace selection passed against disposable PostgreSQL 17.11,
