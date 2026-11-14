@@ -1,15 +1,20 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+#[cfg(any(feature = "cli", test))]
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+#[cfg(any(feature = "cli", test))]
 use cap_std::fs::{File, OpenOptions};
 
-use crate::config::{LoadedConfig, ProjectDirectory, SourceDir};
+#[cfg(any(feature = "cli", test))]
+use crate::config::ProjectDirectory;
+use crate::config::{LoadedConfig, SourceDir};
 use crate::error::{DbmError, Result};
+#[cfg(any(feature = "cli", test))]
+use crate::identity::new_version;
 use crate::identity::{
-    MigrationIdentity, new_version, validate_description, validate_repeatable_name,
-    validate_version,
+    MigrationIdentity, validate_description, validate_repeatable_name, validate_version,
 };
 use crate::migration::{
     Migration, MigrationKind, PairMigrationInput, SqlDialect, TransactionPolicy, parse_pair,
@@ -17,6 +22,7 @@ use crate::migration::{
 };
 use crate::registry::MigrationRegistry;
 
+#[cfg(any(feature = "cli", test))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NewFormat {
     Single,
@@ -382,6 +388,7 @@ fn validate_mysql_nontransactional_source(path: &str, direction: &str, sql: &str
     Ok(())
 }
 
+#[cfg(any(feature = "cli", test))]
 pub fn create_new(
     config: &LoadedConfig,
     description: &str,
@@ -401,6 +408,7 @@ pub fn create_new(
     create_new_at(config, source, description, format, &new_version()?)
 }
 
+#[cfg(any(feature = "cli", test))]
 fn create_new_at(
     config: &LoadedConfig,
     source: &SourceDir,
@@ -494,6 +502,7 @@ fn create_new_at(
     Ok(paths)
 }
 
+#[cfg(any(feature = "cli", test))]
 fn reserve(
     directory: &ProjectDirectory,
     name: &str,
@@ -670,6 +679,7 @@ fn logical_file_path(source: &SourceDir, name: &str) -> String {
     }
 }
 
+#[cfg(any(feature = "cli", test))]
 fn create_exclusive_file(
     directory: &ProjectDirectory,
     name: &str,
@@ -692,12 +702,14 @@ fn create_exclusive_file(
     Ok(())
 }
 
+#[cfg(any(feature = "cli", test))]
 struct Reservation {
     directory: ProjectDirectory,
     name: String,
     file: Option<File>,
 }
 
+#[cfg(any(feature = "cli", test))]
 impl Drop for Reservation {
     fn drop(&mut self) {
         self.file.take();

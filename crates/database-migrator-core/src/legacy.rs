@@ -7,7 +7,8 @@ use crate::error::{DbmError, Result};
 
 pub const IMPORT_SNAPSHOT_VERSION: u32 = 1;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, clap::ValueEnum)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
 #[serde(rename_all = "lowercase")]
 pub enum LegacyTool {
     Knex,

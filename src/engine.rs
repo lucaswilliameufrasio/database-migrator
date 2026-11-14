@@ -216,6 +216,7 @@ pub struct ExecutionReport {
     pub migrations: Vec<String>,
 }
 
+#[cfg(feature = "runner")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RunnerAction {
     Validate,
@@ -228,6 +229,7 @@ pub(crate) enum RunnerAction {
     PlanDown { steps: usize },
 }
 
+#[cfg(feature = "runner")]
 pub(crate) struct RunnerPreflight {
     pub(crate) manifest_fingerprint: String,
     pub(crate) plan_hash: String,
@@ -3467,6 +3469,7 @@ pub async fn plan_with_registry_async(
     Ok(report)
 }
 
+#[cfg(feature = "runner")]
 pub(crate) async fn runner_preflight(
     config: &LoadedConfig,
     registry: &MigrationRegistry,
@@ -3588,6 +3591,7 @@ pub(crate) async fn runner_preflight(
     })
 }
 
+#[cfg(feature = "runner")]
 fn runner_operation_hash(base_hash: &str, direction: &str, steps: usize) -> String {
     let mut hasher = Sha256::new();
     hasher.update(b"dbm-runner-operation-v1\0");
@@ -3617,6 +3621,7 @@ fn target_fingerprint(config: &LoadedConfig, info: &database::DatabaseInfo) -> S
     format!("sha256:{}", hex_digest(hasher.finalize().as_slice()))
 }
 
+#[cfg(feature = "runner")]
 fn configured_target_fingerprint(config: &LoadedConfig) -> String {
     let mut hasher = Sha256::new();
     hasher.update(b"dbm-configured-target-v1\0");
@@ -3653,6 +3658,7 @@ pub async fn up_with_registry_async(
     execute_with_adapter(config, "up", 0, Some(registry), None).await
 }
 
+#[cfg(feature = "runner")]
 pub(crate) async fn up_with_registry_authorized_async(
     config: &LoadedConfig,
     registry: &MigrationRegistry,
@@ -3670,6 +3676,7 @@ pub async fn down_with_registry_async(
     execute_with_adapter(config, "down", steps, Some(registry), None).await
 }
 
+#[cfg(feature = "runner")]
 pub(crate) async fn down_with_registry_authorized_async(
     config: &LoadedConfig,
     registry: &MigrationRegistry,

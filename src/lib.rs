@@ -6,15 +6,19 @@
 
 #[cfg(feature = "ai")]
 pub mod ai;
+#[cfg(feature = "cli")]
 pub mod cli;
 mod database;
+#[cfg(feature = "dsl")]
 pub mod dsl;
 pub mod engine;
+#[cfg(feature = "legacy")]
 mod legacy;
 
 #[cfg(all(test, feature = "mysql"))]
 mod mysql_metadata_upgrade;
 pub mod registry;
+#[cfg(feature = "runner")]
 pub mod runner;
 mod source;
 

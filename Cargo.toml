@@ -25,6 +25,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "dbm"
 path = "src/main.rs"
+required-features = ["cli"]
 
 [[bin]]
 name = "dbm-test-runner"
@@ -33,14 +34,27 @@ required-features = ["test-runner-fixture"]
 test = false
 bench = false
 
+[[example]]
+name = "sqlite_embedded_migration"
+required-features = ["sqlite"]
+
+[[example]]
+name = "sqlite_schema_dsl"
+required-features = ["sqlite", "dsl"]
+
 [features]
-default = ["sqlite", "postgres", "mysql"]
+default = ["sqlite", "postgres", "mysql", "cli", "runner", "legacy", "dsl"]
 sqlite = ["dep:database-migrator-sqlite"]
 postgres = ["dep:database-migrator-postgres", "dep:tokio-postgres"]
 # MySQL and MariaDB share this driver.
 mysql = ["dep:database-migrator-mysql", "dep:mysql_async"]
+# dbm commands for the runner protocol and legacy import.
+cli = ["dep:clap", "database-migrator-core/cli", "runner", "legacy"]
+runner = []
+legacy = []
+dsl = []
 ai = ["dep:cap-fs-ext", "dep:reqwest"]
-test-runner-fixture = []
+test-runner-fixture = ["dsl", "runner"]
 fuzzing-harness = []
 
 [dependencies]
@@ -48,7 +62,7 @@ database-migrator-core = { version = "=1.0.0", path = "crates/database-migrator-
 database-migrator-mysql = { version = "=1.0.0", path = "crates/database-migrator-mysql", optional = true }
 database-migrator-postgres = { version = "=1.0.0", path = "crates/database-migrator-postgres", optional = true }
 database-migrator-sqlite = { version = "=1.0.0", path = "crates/database-migrator-sqlite", optional = true }
-clap = { version = "4.6.7", features = ["derive"] }
+clap = { version = "4.6.7", features = ["derive"], optional = true }
 cap-std = "4.0.3"
 cap-fs-ext = { version = "4.0.3", optional = true }
 rusqlite = { version = "0.41.1", features = ["bundled", "hooks"] }
