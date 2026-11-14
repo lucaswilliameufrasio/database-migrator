@@ -1,11 +1,11 @@
 # Progresso pós-1.0
 
-> **Estado:** A4 feito em 2026-11-14. Próximo passo: B1.
+> **Estado:** B1 feito em 2026-11-14. Próximo passo: B2.
 > **Base:** tag `v1.0.0`, commit `9972f56adb1f01646096cb017c2c0657e8726e2c`.
 > **Decisão:** [ADR-026](adr/ADR-026-workspace-e-produto-cliente.md).
 > **Como atualizar:** no commit que entrega um item, mude o estado dessa linha e a data desta revisão. Não reescreva o histórico da V1 no plano mestre.
 
-**Revisão:** 2026-11-14. Próximo passo: B1.
+**Revisão:** 2026-11-14. Próximo passo: B2.
 
 O release 1.0.0 continua valendo como foi evidenciado: Linux x86_64, metadata 5, API pública congelada, crate não publicado. Este arquivo acompanha o que vem depois. G11 e G12 do plano mestre são o critério histórico da V1.
 
@@ -57,9 +57,11 @@ A4, em 2026-11-14, documentou esse embed em `docs/embed.md` e apontou o texto no
 
 | ID | Item | Estado |
 | --- | --- | --- |
-| B1 | Jobs em runner macOS e Windows do GitHub para formatar, lint, testar, buildar e rodar os exemplos SQLite. Sem serviço de banco nesse job. | pendente |
+| B1 | Jobs em runner macOS e Windows do GitHub para formatar, lint, testar, buildar e rodar os exemplos SQLite. Sem serviço de banco nesse job. | feito |
 | B2 | Atualizar a matriz de suporte só com o que o job verde cobriu. O texto da 1.0 sobre Linux x86_64 permanece como evidência daquele release. | pendente |
 | B3 | Matriz de falha com PostgreSQL, MySQL e MariaDB em macOS ou Windows, somente se formos declarar suporte de servidor nesses sistemas. | pendente |
+
+B1, em 2026-11-14, adicionou o job `quality-platforms` em `.github/workflows/ci.yml`. A matriz usa `macos-latest` e `windows-latest`, com `fail-fast: false`. Cada runner formata, roda Clippy com `-D warnings`, `cargo test --workspace --all-features --locked`, o build e os dois exemplos SQLite. Não há `services` nem URL de banco, então os testes de servidor continuam ignorados. Os jobs Linux de qualidade, supply-chain e performance permanecem. O checkout continua `actions/checkout` v7.0.1 (`3d3c42e5aac5ba805825da76410c181273ba90b1`), conferido na release upstream em 2026-11-14. A matriz de suporte não mudou. O CI remoto não rodou.
 
 ### C. Produto de cliente, repositório novo
 

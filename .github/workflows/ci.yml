@@ -37,6 +37,53 @@ jobs:
           cargo run --example sqlite_embedded_migration --locked
           cargo run --example sqlite_schema_dsl --locked
 
+  # SQLite suite on the other hosted operating systems. No database service:
+  # server tests stay ignored unless a URL is set, and this job sets none.
+  quality-platforms:
+    name: Format, lint, test, and build SQLite (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Keep repository line endings
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+
+      # Revalidated against the canonical upstream release on 2026-11-14:
+      # https://github.com/actions/checkout/releases/tag/v7.0.1
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned Rust toolchain
+        run: |
+          if [ -d "$HOME/.cargo/bin" ]; then
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup toolchain install 1.99.1 --profile minimal --component clippy --component rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace --all-features --locked
+
+      - name: Build
+        run: cargo build --workspace --all-features --locked
+
+      - name: Run executable examples
+        run: |
+          cargo run --example sqlite_embedded_migration --locked
+          cargo run --example sqlite_schema_dsl --locked
+
   supply-chain:
     name: Audit dependencies and generate SBOM
     runs-on: ubuntu-latest
