@@ -1,0 +1,22 @@
+[package]
+name = "database-migrator-sqlite"
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "SQLite driver for database-migrator"
+
+[dependencies]
+database-migrator-core = { version = "=1.0.0", path = "../database-migrator-core" }
+rusqlite = { version = "0.41.1", features = ["bundled", "hooks"] }
+tokio = { version = "1.51.0", features = ["macros", "rt-multi-thread", "sync"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"

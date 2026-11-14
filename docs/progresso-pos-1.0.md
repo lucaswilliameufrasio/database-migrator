@@ -1,11 +1,11 @@
 # Progresso pós-1.0
 
-> **Estado:** decisões aceitas em 2026-11-14. Nenhum item abaixo foi implementado.
+> **Estado:** A1 feito em 2026-11-14. Próximo passo de código: A2.
 > **Base:** tag `v1.0.0`, commit `9972f56adb1f01646096cb017c2c0657e8726e2c`.
 > **Decisão:** [ADR-026](adr/ADR-026-workspace-e-produto-cliente.md).
 > **Como atualizar:** no commit que entrega um item, mude o estado dessa linha e a data desta revisão. Não reescreva o histórico da V1 no plano mestre.
 
-**Revisão:** 2026-11-14. Próximo passo de código: A1.
+**Revisão:** 2026-11-14. Próximo passo de código: A2.
 
 O release 1.0.0 continua valendo como foi evidenciado: Linux x86_64, metadata 5, API pública congelada, crate não publicado. Este arquivo acompanha o que vem depois. G11 e G12 do plano mestre são o critério histórico da V1.
 
@@ -31,10 +31,16 @@ Estado usado nas tabelas: `pendente`, `em andamento`, `feito`.
 
 | ID | Item | Estado |
 | --- | --- | --- |
-| A1 | Extrair SQLite, PostgreSQL e MySQL/MariaDB para crates internas com `publish = false`. A facade depende das três sempre. API, metadata 5, binário e comportamento iguais. Suíte atual verde em Linux. | pendente |
+| A1 | Extrair SQLite, PostgreSQL e MySQL/MariaDB para crates internas com `publish = false`. A facade depende das três sempre. API, metadata 5, binário e comportamento iguais. Suíte atual verde em Linux. | feito |
 | A2 | Features `sqlite`, `postgres` e `mysql` ligadas por padrão. Provar que `default-features = false` com `sqlite` não compila `tokio-postgres` nem `mysql_async`. | pendente |
 | A3 | CLI, runner, importação legada e DSL viram features ligadas por padrão. O binário `dbm` continua completo. | pendente |
 | A4 | Documentar o embed opt-in e a diferença para o contrato da 1.0, inclusive o Tokio que permanece na facade. | pendente |
+
+A1 criou `database-migrator-core`, `database-migrator-sqlite`, `database-migrator-postgres` e `database-migrator-mysql`, todas com `publish = false` e requisito `=1.0.0`. A facade continua sem feature de engine e depende das três. Metadata 5 e o binário `dbm` permanecem.
+
+O módulo público `config` passou a alcançar, com `#[doc(hidden)]`, tipos e campos que na 1.0 eram `pub(crate)`. Nenhum caminho público foi removido. A superfície não é idêntica byte a byte. O teste ignorado de upgrade da metadata MySQL ficou na facade, porque chama o engine. Três auxiliares desse teste estão `pub` com `#[doc(hidden)]` na crate MySQL.
+
+No Linux, em 2026-11-14, passaram formatação, `git diff --check`, Clippy com `-D warnings`, `cargo test --workspace --all-features --locked` (162 passed, 49 ignored), o build, os dois exemplos SQLite e `scripts/supply-chain.sh` nos dois lockfiles. A matriz de falha com servidor não rodou.
 
 ### B. Plataformas no GitHub
 

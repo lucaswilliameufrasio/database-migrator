@@ -300,6 +300,7 @@ impl Cli {
     }
 
     pub async fn run(self) -> Result<()> {
+        crate::database::ensure_adapters();
         match self.command {
             Command::Init { driver } => {
                 if driver != "sqlite" {

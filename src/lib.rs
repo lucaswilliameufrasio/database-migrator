@@ -6,20 +6,24 @@
 
 #[cfg(feature = "ai")]
 pub mod ai;
-mod async_runtime;
 pub mod cli;
-pub mod config;
 mod database;
 pub mod dsl;
 pub mod engine;
-pub mod error;
-mod identity;
 mod legacy;
-mod migration;
+
+#[cfg(test)]
+mod mysql_metadata_upgrade;
 pub mod registry;
 pub mod runner;
 mod source;
-mod storage;
+
+pub(crate) use database_migrator_core::async_runtime;
+pub use database_migrator_core::config;
+pub use database_migrator_core::error;
+pub(crate) use database_migrator_core::identity;
+pub(crate) use database_migrator_core::migration;
+pub(crate) use database_migrator_core::storage;
 
 pub use engine::MigrationContext;
 pub use error::{DbmError, Result};

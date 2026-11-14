@@ -14,24 +14,36 @@ use crate::identity::validate_namespace;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Config {
-    pub(crate) version: u32,
-    pub(crate) namespace: String,
-    pub(crate) source: Vec<PathBuf>,
-    pub(crate) target: TargetConfig,
+#[doc(hidden)]
+pub struct Config {
+    #[doc(hidden)]
+    pub version: u32,
+    #[doc(hidden)]
+    pub namespace: String,
+    #[doc(hidden)]
+    pub source: Vec<PathBuf>,
+    #[doc(hidden)]
+    pub target: TargetConfig,
     #[serde(default)]
-    pub(crate) execution: ExecutionConfig,
+    #[doc(hidden)]
+    pub execution: ExecutionConfig,
     #[serde(default)]
-    pub(crate) ai: AiConfig,
+    #[doc(hidden)]
+    pub ai: AiConfig,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-pub(crate) struct AiConfig {
-    pub(crate) enabled: bool,
-    pub(crate) provider: String,
-    pub(crate) profile: String,
-    pub(crate) profiles: BTreeMap<String, AiProfileConfig>,
+#[doc(hidden)]
+pub struct AiConfig {
+    #[doc(hidden)]
+    pub enabled: bool,
+    #[doc(hidden)]
+    pub provider: String,
+    #[doc(hidden)]
+    pub profile: String,
+    #[doc(hidden)]
+    pub profiles: BTreeMap<String, AiProfileConfig>,
 }
 
 impl Default for AiConfig {
@@ -47,13 +59,20 @@ impl Default for AiConfig {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-pub(crate) struct AiProfileConfig {
-    pub(crate) endpoint: String,
-    pub(crate) model: String,
-    pub(crate) api_key_env: String,
-    pub(crate) timeout_seconds: u64,
-    pub(crate) max_tokens: u32,
-    pub(crate) max_context_bytes: usize,
+#[doc(hidden)]
+pub struct AiProfileConfig {
+    #[doc(hidden)]
+    pub endpoint: String,
+    #[doc(hidden)]
+    pub model: String,
+    #[doc(hidden)]
+    pub api_key_env: String,
+    #[doc(hidden)]
+    pub timeout_seconds: u64,
+    #[doc(hidden)]
+    pub max_tokens: u32,
+    #[doc(hidden)]
+    pub max_context_bytes: usize,
 }
 
 impl Default for AiProfileConfig {
@@ -71,22 +90,30 @@ impl Default for AiProfileConfig {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct TargetConfig {
-    pub(crate) driver: String,
+#[doc(hidden)]
+pub struct TargetConfig {
+    #[doc(hidden)]
+    pub driver: String,
     #[serde(default)]
-    pub(crate) database: Option<PathBuf>,
+    #[doc(hidden)]
+    pub database: Option<PathBuf>,
     #[serde(default)]
-    pub(crate) url_env: Option<String>,
+    #[doc(hidden)]
+    pub url_env: Option<String>,
     #[serde(default)]
-    pub(crate) tls_ca_cert_env: Option<String>,
+    #[doc(hidden)]
+    pub tls_ca_cert_env: Option<String>,
     #[serde(default)]
-    pub(crate) allow_insecure_transport: bool,
-    pub(crate) environment: Environment,
+    #[doc(hidden)]
+    pub allow_insecure_transport: bool,
+    #[doc(hidden)]
+    pub environment: Environment,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum Environment {
+#[doc(hidden)]
+pub enum Environment {
     Development,
     Test,
     Production,
@@ -94,11 +121,16 @@ pub(crate) enum Environment {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-pub(crate) struct ExecutionConfig {
-    pub(crate) busy_timeout_seconds: u64,
-    pub(crate) runner: Option<PathBuf>,
-    pub(crate) runner_env: Vec<String>,
-    pub(crate) runner_timeout_seconds: u64,
+#[doc(hidden)]
+pub struct ExecutionConfig {
+    #[doc(hidden)]
+    pub busy_timeout_seconds: u64,
+    #[doc(hidden)]
+    pub runner: Option<PathBuf>,
+    #[doc(hidden)]
+    pub runner_env: Vec<String>,
+    #[doc(hidden)]
+    pub runner_timeout_seconds: u64,
 }
 
 impl Default for ExecutionConfig {
@@ -113,20 +145,26 @@ impl Default for ExecutionConfig {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct SourceDir {
-    pub(crate) path: PathBuf,
-    pub(crate) relative_path: PathBuf,
-    pub(crate) logical_path: String,
+#[doc(hidden)]
+pub struct SourceDir {
+    #[doc(hidden)]
+    pub path: PathBuf,
+    #[doc(hidden)]
+    pub relative_path: PathBuf,
+    #[doc(hidden)]
+    pub logical_path: String,
 }
 
 #[derive(Clone)]
-pub(crate) struct ProjectDirectory {
+#[doc(hidden)]
+pub struct ProjectDirectory {
     path: PathBuf,
     directory: Arc<Dir>,
 }
 
 impl ProjectDirectory {
-    pub(crate) fn open_ambient(path: &Path) -> std::io::Result<Self> {
+    #[doc(hidden)]
+    pub fn open_ambient(path: &Path) -> std::io::Result<Self> {
         let directory = Dir::open_ambient_dir(path, ambient_authority())?;
         Ok(Self {
             path: path.to_path_buf(),
@@ -134,7 +172,8 @@ impl ProjectDirectory {
         })
     }
 
-    pub(crate) fn open_dir(&self, path: &Path) -> std::io::Result<Self> {
+    #[doc(hidden)]
+    pub fn open_dir(&self, path: &Path) -> std::io::Result<Self> {
         let directory = self.directory.open_dir(path)?;
         Ok(Self {
             path: self.path.join(path),
@@ -142,11 +181,13 @@ impl ProjectDirectory {
         })
     }
 
-    pub(crate) fn dir(&self) -> &Dir {
+    #[doc(hidden)]
+    pub fn dir(&self) -> &Dir {
         self.directory.as_ref()
     }
 
-    pub(crate) fn path(&self) -> &Path {
+    #[doc(hidden)]
+    pub fn path(&self) -> &Path {
         &self.path
     }
 }
@@ -162,14 +203,19 @@ impl fmt::Debug for ProjectDirectory {
 
 #[derive(Clone, Debug)]
 pub struct LoadedConfig {
-    pub(crate) config: Config,
-    pub(crate) source_dirs: Vec<SourceDir>,
-    pub(crate) database_path: Option<PathBuf>,
-    pub(crate) project_directory: ProjectDirectory,
+    #[doc(hidden)]
+    pub config: Config,
+    #[doc(hidden)]
+    pub source_dirs: Vec<SourceDir>,
+    #[doc(hidden)]
+    pub database_path: Option<PathBuf>,
+    #[doc(hidden)]
+    pub project_directory: ProjectDirectory,
 }
 
 impl LoadedConfig {
-    pub(crate) fn sqlite_database_path(&self) -> Result<&Path> {
+    #[doc(hidden)]
+    pub fn sqlite_database_path(&self) -> Result<&Path> {
         if self.config.target.driver != "sqlite" {
             return Err(DbmError::Unsupported(format!(
                 "the {} adapter is not available for this operation",
@@ -181,7 +227,8 @@ impl LoadedConfig {
         })
     }
 
-    pub(crate) fn target_description(&self) -> String {
+    #[doc(hidden)]
+    pub fn target_description(&self) -> String {
         match self.config.target.driver.as_str() {
             "sqlite" => self
                 .database_path

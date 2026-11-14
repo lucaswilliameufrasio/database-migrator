@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -7,194 +5,15 @@ use uuid::Uuid;
 use crate::config::LoadedConfig;
 use crate::error::{DbmError, Result};
 
-const IMPORT_SNAPSHOT_VERSION: u32 = 1;
+pub(crate) use database_migrator_core::legacy::{
+    GooseRow, IMPORT_SNAPSHOT_VERSION, ImportBlocker, KnexLock, KnexRow, LegacyAdoptRequest,
+    LegacyAdoptionWrite, LegacyImportAdoptReport, LegacyImportApplyReport, LegacyImportPlan,
+    LegacyImportSnapshot, LegacyImportVerifyReport, LegacyImportWrite, LegacyTool,
+    NativeMigrationFingerprint, SqlxRow, event_state_name, hex_digest, inspect_goose, inspect_knex,
+    inspect_sqlx, tool_name, verification_status_name,
+};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, clap::ValueEnum)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum LegacyTool {
-    Knex,
-    Goose,
-    Sqlx,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub(crate) struct LegacyChecksum {
-    pub(crate) algorithm: String,
-    pub(crate) value: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub(crate) struct LegacyEvent {
-    pub(crate) event_id: String,
-    pub(crate) original_version: String,
-    pub(crate) state: LegacyEventState,
-    pub(crate) filename: Option<String>,
-    pub(crate) batch_id: Option<String>,
-    pub(crate) applied_at: Option<String>,
-    pub(crate) checksum: Option<LegacyChecksum>,
-    pub(crate) execution_time_ms: Option<i64>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum LegacyEventState {
-    Applied,
-    Reverted,
-    Failed,
-    Sentinel,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum VerificationStatus {
-    Partial,
-    Unverifiable,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub(crate) struct ImportedMigration {
-    pub(crate) original_identity: String,
-    pub(crate) original_version: String,
-    pub(crate) filename: Option<String>,
-    pub(crate) batch_id: Option<String>,
-    pub(crate) applied_at: Option<String>,
-    pub(crate) checksum: Option<LegacyChecksum>,
-    pub(crate) execution_time_ms: Option<i64>,
-    pub(crate) verification_status: VerificationStatus,
-    pub(crate) rollback_blocked: bool,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub(crate) struct ImportBlocker {
-    pub(crate) code: &'static str,
-    pub(crate) message: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub(crate) struct LegacyImportSnapshot {
-    pub(crate) schema_version: u32,
-    pub(crate) tool: LegacyTool,
-    /// A digest of the database identity; raw connection details are never retained.
-    pub(crate) source_identity: String,
-    pub(crate) events: Vec<LegacyEvent>,
-    pub(crate) current_migrations: Vec<ImportedMigration>,
-    pub(crate) blockers: Vec<ImportBlocker>,
-    pub(crate) digest: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub(crate) struct LegacyImportPlan {
-    pub(crate) schema_version: &'static str,
-    pub(crate) command: &'static str,
-    pub(crate) status: &'static str,
-    pub(crate) source: LegacyImportSnapshot,
-    pub(crate) local_migrations: Vec<NativeMigrationFingerprint>,
-    pub(crate) blockers: Vec<ImportBlocker>,
-    pub(crate) digest: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub(crate) struct LegacyImportApplyReport {
-    pub(crate) schema_version: &'static str,
-    pub(crate) command: &'static str,
-    pub(crate) status: &'static str,
-    pub(crate) import_id: String,
-    pub(crate) digest: String,
-    pub(crate) event_count: usize,
-    pub(crate) current_migration_count: usize,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub(crate) struct LegacyImportVerifyReport {
-    pub(crate) schema_version: &'static str,
-    pub(crate) command: &'static str,
-    pub(crate) status: &'static str,
-    pub(crate) import_id: String,
-    pub(crate) snapshot_digest: String,
-    pub(crate) plan_digest: String,
-    pub(crate) event_count: usize,
-    pub(crate) current_migration_count: usize,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub(crate) struct LegacyImportAdoptReport {
-    pub(crate) schema_version: &'static str,
-    pub(crate) command: &'static str,
-    pub(crate) status: &'static str,
-    pub(crate) import_id: String,
-    pub(crate) legacy_identity: String,
-    pub(crate) native_version: String,
-    pub(crate) adoption_id: String,
-}
-
-pub(crate) struct LegacyAdoptRequest<'a> {
-    pub(crate) tool: LegacyTool,
-    pub(crate) import_id: &'a str,
-    pub(crate) legacy_identity: &'a str,
-    pub(crate) native_version: &'a str,
-    pub(crate) evidence_ref: &'a str,
-    pub(crate) reason: &'a str,
-    pub(crate) actor: &'a str,
-    pub(crate) approved: bool,
-    pub(crate) approved_target: Option<&'a str>,
-}
-
-pub(crate) struct LegacyImportWrite<'a> {
-    pub(crate) namespace: &'a str,
-    pub(crate) import_id: &'a str,
-    pub(crate) tool: LegacyTool,
-    pub(crate) source: &'a LegacyImportSnapshot,
-    pub(crate) plan_digest: &'a str,
-    pub(crate) imported_at: &'a str,
-}
-
-pub(crate) struct LegacyAdoptionWrite<'a> {
-    pub(crate) adoption_id: &'a str,
-    pub(crate) namespace: &'a str,
-    pub(crate) import_id: &'a str,
-    pub(crate) legacy_migration_key: &'a str,
-    pub(crate) native_migration_key: &'a str,
-    pub(crate) native_version: &'a str,
-    pub(crate) native_checksum: &'a str,
-    pub(crate) evidence_ref: &'a str,
-    pub(crate) actor: &'a str,
-    pub(crate) reason: &'a str,
-    pub(crate) adopted_at: &'a str,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct KnexRow {
-    pub(crate) id: i64,
-    pub(crate) name: String,
-    pub(crate) batch: i64,
-    pub(crate) migration_time: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct KnexLock {
-    pub(crate) is_locked: bool,
-    pub(crate) index: Option<i64>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct GooseRow {
-    pub(crate) id: i64,
-    pub(crate) version_id: i64,
-    pub(crate) is_applied: bool,
-    pub(crate) timestamp: Option<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct SqlxRow {
-    pub(crate) version: i64,
-    pub(crate) description: String,
-    pub(crate) installed_on: Option<String>,
-    pub(crate) success: bool,
-    pub(crate) checksum: Vec<u8>,
-    pub(crate) execution_time_ms: i64,
-}
-
-pub(crate) fn inspect_from_config(
+pub fn inspect_from_config(
     config: &LoadedConfig,
     tool: LegacyTool,
 ) -> Result<LegacyImportSnapshot> {
@@ -308,7 +127,7 @@ pub(crate) fn inspect_from_config(
     report
 }
 
-pub(crate) async fn inspect_async(
+pub async fn inspect_async(
     config: &LoadedConfig,
     tool: LegacyTool,
 ) -> Result<LegacyImportSnapshot> {
@@ -335,10 +154,7 @@ pub(crate) async fn inspect_async(
     close_session_with_result(session.as_mut(), result).await
 }
 
-pub(crate) fn plan_from_config(
-    config: &LoadedConfig,
-    tool: LegacyTool,
-) -> Result<LegacyImportPlan> {
+pub fn plan_from_config(config: &LoadedConfig, tool: LegacyTool) -> Result<LegacyImportPlan> {
     if config.config.execution.runner.is_some() {
         return Err(DbmError::Unsupported(
             "legacy import planning cannot verify registered runner migrations yet".to_owned(),
@@ -350,10 +166,7 @@ pub(crate) fn plan_from_config(
     build_plan_from_source(config, source, metadata.initialized, blockers)
 }
 
-pub(crate) async fn plan_async(
-    config: &LoadedConfig,
-    tool: LegacyTool,
-) -> Result<LegacyImportPlan> {
+pub async fn plan_async(config: &LoadedConfig, tool: LegacyTool) -> Result<LegacyImportPlan> {
     if config.config.target.driver == "sqlite" {
         let config = config.clone();
         return crate::async_runtime::run_blocking(move || plan_from_config(&config, tool)).await;
@@ -484,7 +297,7 @@ fn build_plan_from_source(
     })
 }
 
-pub(crate) fn apply_from_config(
+pub fn apply_from_config(
     config: &LoadedConfig,
     tool: LegacyTool,
     approved_digest: &str,
@@ -667,7 +480,7 @@ pub(crate) fn apply_from_config(
     })
 }
 
-pub(crate) async fn apply_async(
+pub async fn apply_async(
     config: &LoadedConfig,
     tool: LegacyTool,
     approved_digest: &str,
@@ -805,7 +618,7 @@ pub(crate) async fn apply_async(
     close_session_with_result(session.as_mut(), result).await
 }
 
-pub(crate) fn verify_from_config(
+pub fn verify_from_config(
     config: &LoadedConfig,
     tool: LegacyTool,
     import_id: &str,
@@ -852,7 +665,7 @@ pub(crate) fn verify_from_config(
     })
 }
 
-pub(crate) async fn verify_async(
+pub async fn verify_async(
     config: &LoadedConfig,
     tool: LegacyTool,
     import_id: &str,
@@ -920,7 +733,7 @@ pub(crate) async fn verify_async(
     close_session_with_result(session.as_mut(), result).await
 }
 
-pub(crate) fn adopt_from_config(
+pub fn adopt_from_config(
     config: &LoadedConfig,
     request: LegacyAdoptRequest<'_>,
 ) -> Result<LegacyImportAdoptReport> {
@@ -1093,7 +906,7 @@ pub(crate) fn adopt_from_config(
     })
 }
 
-pub(crate) async fn adopt_async(
+pub async fn adopt_async(
     config: &LoadedConfig,
     request: LegacyAdoptRequest<'_>,
 ) -> Result<LegacyImportAdoptReport> {
@@ -1370,41 +1183,6 @@ fn blocker_summary(blockers: &[ImportBlocker]) -> String {
         .join("; ")
 }
 
-pub(crate) fn tool_name(tool: LegacyTool) -> &'static str {
-    match tool {
-        LegacyTool::Knex => "knex",
-        LegacyTool::Goose => "goose",
-        LegacyTool::Sqlx => "sqlx",
-    }
-}
-
-pub(crate) fn event_state_name(state: LegacyEventState) -> &'static str {
-    match state {
-        LegacyEventState::Applied => "applied",
-        LegacyEventState::Reverted => "reverted",
-        LegacyEventState::Failed => "failed",
-        LegacyEventState::Sentinel => "sentinel",
-    }
-}
-
-pub(crate) fn verification_status_name(status: VerificationStatus) -> &'static str {
-    match status {
-        VerificationStatus::Partial => "partial",
-        VerificationStatus::Unverifiable => "unverifiable",
-    }
-}
-
-pub(crate) fn parse_legacy_bool(value: &str, tool: &str, field: &str) -> Result<bool> {
-    match value.to_ascii_lowercase().as_str() {
-        "1" | "true" | "t" | "yes" => Ok(true),
-        "0" | "false" | "f" | "no" => Ok(false),
-        _ => Err(DbmError::InvalidMigration {
-            path: format!("legacy:{tool}:{field}"),
-            message: "source boolean field has an unsupported representation".to_owned(),
-        }),
-    }
-}
-
 fn verify_import_contents(
     metadata: &crate::storage::MetadataSnapshot,
     import: &crate::storage::LegacyImportRecord,
@@ -1516,261 +1294,6 @@ fn verify_import_contents(
     Ok(())
 }
 
-pub(crate) fn inspect_knex(
-    source_identity: &str,
-    mut rows: Vec<KnexRow>,
-    lock: Option<KnexLock>,
-) -> Result<LegacyImportSnapshot> {
-    validate_source_identity(source_identity)?;
-    sort_and_validate_ids(&mut rows, |row| row.id, "Knex")?;
-
-    let mut events = Vec::with_capacity(rows.len());
-    let mut current_migrations = Vec::with_capacity(rows.len());
-    for row in rows {
-        let original_identity = row.id.to_string();
-        let original_version = row.name.clone();
-        events.push(LegacyEvent {
-            event_id: original_identity.clone(),
-            original_version: original_version.clone(),
-            state: LegacyEventState::Applied,
-            filename: Some(row.name.clone()),
-            batch_id: Some(row.batch.to_string()),
-            applied_at: row.migration_time.clone(),
-            checksum: None,
-            execution_time_ms: None,
-        });
-        current_migrations.push(ImportedMigration {
-            original_identity,
-            original_version,
-            filename: Some(row.name),
-            batch_id: Some(row.batch.to_string()),
-            applied_at: row.migration_time,
-            checksum: None,
-            execution_time_ms: None,
-            verification_status: VerificationStatus::Unverifiable,
-            rollback_blocked: true,
-        });
-    }
-
-    let mut blockers = Vec::new();
-    match lock {
-        Some(lock) if lock.is_locked => {
-            blockers.push(ImportBlocker {
-                code: "LEGACY_LOCK_ACTIVE",
-                message: match lock.index {
-                    Some(index) => {
-                        format!("Knex reports an active migration lock at index {index}")
-                    }
-                    None => "Knex reports an active migration lock".to_owned(),
-                },
-            });
-        }
-        Some(_) => {}
-        None => {
-            blockers.push(ImportBlocker {
-                code: "LEGACY_LOCK_STATE_UNKNOWN",
-                message: "Knex lock state is unavailable; cutover cannot establish that no legacy migration is active".to_owned(),
-            });
-        }
-    }
-
-    build_snapshot(
-        LegacyTool::Knex,
-        source_identity,
-        events,
-        current_migrations,
-        blockers,
-    )
-}
-
-pub(crate) fn inspect_goose(
-    source_identity: &str,
-    mut rows: Vec<GooseRow>,
-) -> Result<LegacyImportSnapshot> {
-    validate_source_identity(source_identity)?;
-    sort_and_validate_ids(&mut rows, |row| row.id, "Goose")?;
-
-    let mut events = Vec::with_capacity(rows.len());
-    let mut latest_by_version = HashMap::<i64, usize>::new();
-    for row in rows {
-        let state = if row.version_id == 0 {
-            LegacyEventState::Sentinel
-        } else if row.is_applied {
-            LegacyEventState::Applied
-        } else {
-            LegacyEventState::Reverted
-        };
-        let event_index = events.len();
-        events.push(LegacyEvent {
-            event_id: row.id.to_string(),
-            original_version: row.version_id.to_string(),
-            state,
-            filename: None,
-            batch_id: None,
-            applied_at: row.timestamp,
-            checksum: None,
-            execution_time_ms: None,
-        });
-        if row.version_id != 0 {
-            latest_by_version.insert(row.version_id, event_index);
-        }
-    }
-
-    let mut current_migrations = Vec::new();
-    for (index, event) in events.iter().enumerate() {
-        let version = event.original_version.parse::<i64>().map_err(|_| {
-            invalid_legacy_row(
-                "Goose",
-                &event.event_id,
-                "version_id is not a valid integer",
-            )
-        })?;
-        let is_latest = latest_by_version.get(&version) == Some(&index);
-        if is_latest && event.state == LegacyEventState::Applied {
-            current_migrations.push(ImportedMigration {
-                original_identity: event.event_id.clone(),
-                original_version: event.original_version.clone(),
-                filename: None,
-                batch_id: None,
-                applied_at: event.applied_at.clone(),
-                checksum: None,
-                execution_time_ms: None,
-                verification_status: VerificationStatus::Unverifiable,
-                rollback_blocked: true,
-            });
-        }
-    }
-
-    build_snapshot(
-        LegacyTool::Goose,
-        source_identity,
-        events,
-        current_migrations,
-        Vec::new(),
-    )
-}
-
-pub(crate) fn inspect_sqlx(
-    source_identity: &str,
-    mut rows: Vec<SqlxRow>,
-) -> Result<LegacyImportSnapshot> {
-    validate_source_identity(source_identity)?;
-    sort_and_validate_ids(&mut rows, |row| row.version, "SQLx")?;
-
-    let mut events = Vec::with_capacity(rows.len());
-    let mut current_migrations = Vec::with_capacity(rows.len());
-    let mut blockers = Vec::new();
-    for row in rows {
-        if row.checksum.len() != 48 {
-            return Err(invalid_legacy_row(
-                "SQLx",
-                &row.version.to_string(),
-                "checksum is not a 48-byte SHA-384 digest",
-            ));
-        }
-        if row.execution_time_ms < 0 {
-            return Err(invalid_legacy_row(
-                "SQLx",
-                &row.version.to_string(),
-                "execution_time is negative",
-            ));
-        }
-        let checksum = LegacyChecksum {
-            algorithm: "sha384".to_owned(),
-            value: hex_digest(&row.checksum),
-        };
-        let version = row.version.to_string();
-        let event_state = if row.success {
-            LegacyEventState::Applied
-        } else {
-            blockers.push(ImportBlocker {
-                code: "SQLX_MIGRATION_FAILED",
-                message: format!(
-                    "SQLx migration version {version} is marked success=false; reconcile it before cutover"
-                ),
-            });
-            LegacyEventState::Failed
-        };
-        events.push(LegacyEvent {
-            event_id: version.clone(),
-            original_version: version.clone(),
-            state: event_state,
-            filename: Some(row.description.clone()),
-            batch_id: None,
-            applied_at: row.installed_on.clone(),
-            checksum: Some(checksum.clone()),
-            execution_time_ms: Some(row.execution_time_ms),
-        });
-        if row.success {
-            current_migrations.push(ImportedMigration {
-                original_identity: version.clone(),
-                original_version: version,
-                filename: Some(row.description),
-                batch_id: None,
-                applied_at: row.installed_on,
-                checksum: Some(checksum),
-                execution_time_ms: Some(row.execution_time_ms),
-                verification_status: VerificationStatus::Partial,
-                rollback_blocked: true,
-            });
-        }
-    }
-
-    build_snapshot(
-        LegacyTool::Sqlx,
-        source_identity,
-        events,
-        current_migrations,
-        blockers,
-    )
-}
-
-fn build_snapshot(
-    tool: LegacyTool,
-    source_identity: &str,
-    events: Vec<LegacyEvent>,
-    current_migrations: Vec<ImportedMigration>,
-    blockers: Vec<ImportBlocker>,
-) -> Result<LegacyImportSnapshot> {
-    let digest_input = DigestInput {
-        schema_version: IMPORT_SNAPSHOT_VERSION,
-        tool,
-        source_identity,
-        events: &events,
-        current_migrations: &current_migrations,
-        blockers: &blockers,
-    };
-    let canonical = serde_json::to_vec(&digest_input)?;
-    let digest = format!("sha256:{}", hex_digest(&Sha256::digest(canonical)));
-    Ok(LegacyImportSnapshot {
-        schema_version: IMPORT_SNAPSHOT_VERSION,
-        tool,
-        source_identity: source_identity.to_owned(),
-        events,
-        current_migrations,
-        blockers,
-        digest,
-    })
-}
-
-#[derive(Serialize)]
-struct DigestInput<'a> {
-    schema_version: u32,
-    tool: LegacyTool,
-    source_identity: &'a str,
-    events: &'a [LegacyEvent],
-    current_migrations: &'a [ImportedMigration],
-    blockers: &'a [ImportBlocker],
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub(crate) struct NativeMigrationFingerprint {
-    pub(crate) namespace: String,
-    pub(crate) version: String,
-    pub(crate) filename: String,
-    pub(crate) checksum: String,
-}
-
 #[derive(Serialize)]
 struct ImportPlanDigestInput<'a> {
     schema_version: u32,
@@ -1779,32 +1302,6 @@ struct ImportPlanDigestInput<'a> {
     namespace: &'a str,
     native_migrations: &'a [NativeMigrationFingerprint],
     blockers: &'a [ImportBlocker],
-}
-
-fn sort_and_validate_ids<T>(rows: &mut [T], id: impl Fn(&T) -> i64, tool: &str) -> Result<()> {
-    rows.sort_by_key(&id);
-    let mut previous_id = None;
-    for row in rows {
-        let row_id = id(row);
-        if previous_id == Some(row_id) {
-            return Err(invalid_legacy_row(
-                tool,
-                &row_id.to_string(),
-                "source event identifier is duplicated",
-            ));
-        }
-        previous_id = Some(row_id);
-    }
-    Ok(())
-}
-
-fn validate_source_identity(source_identity: &str) -> Result<()> {
-    if source_identity.is_empty() || source_identity.chars().any(char::is_control) {
-        return Err(DbmError::Configuration(
-            "legacy import requires a non-empty, control-free source identity digest".to_owned(),
-        ));
-    }
-    Ok(())
 }
 
 fn source_identity_fingerprint(target_identity: &str, namespace: &str) -> String {
@@ -1896,221 +1393,4 @@ fn sqlite_table_exists(connection: &rusqlite::Connection, table: &str) -> Result
             |row| row.get(0),
         )
         .map_err(DbmError::from)
-}
-
-fn invalid_legacy_row(tool: &str, event_id: &str, reason: &str) -> DbmError {
-    DbmError::InvalidMigration {
-        path: format!("legacy:{tool}:{event_id}"),
-        message: reason.to_owned(),
-    }
-}
-
-fn hex_digest(bytes: &[u8]) -> String {
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-        let _ = write!(output, "{byte:02x}");
-    }
-    output
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        GooseRow, KnexLock, KnexRow, LegacyEventState, SqlxRow, VerificationStatus, inspect_goose,
-        inspect_knex, inspect_sqlx,
-    };
-
-    const SOURCE_IDENTITY: &str = "sha256:source-db-fixture";
-
-    #[test]
-    fn knex_preserves_full_filename_batch_order_and_active_lock() {
-        let snapshot = inspect_knex(
-            SOURCE_IDENTITY,
-            vec![
-                KnexRow {
-                    id: 2,
-                    name: "20261002_create_orders.ts".to_owned(),
-                    batch: 7,
-                    migration_time: Some("2026-10-02 03:04:05.000".to_owned()),
-                },
-                KnexRow {
-                    id: 1,
-                    name: "20261001_create_users.js".to_owned(),
-                    batch: 6,
-                    migration_time: None,
-                },
-            ],
-            Some(KnexLock {
-                is_locked: true,
-                index: Some(1),
-            }),
-        )
-        .expect("inspect Knex history");
-
-        assert_eq!(snapshot.events[0].event_id, "1");
-        assert_eq!(
-            snapshot.events[1].filename.as_deref(),
-            Some("20261002_create_orders.ts")
-        );
-        assert_eq!(
-            snapshot.current_migrations[1].batch_id.as_deref(),
-            Some("7")
-        );
-        assert_eq!(
-            snapshot.current_migrations[0].verification_status,
-            VerificationStatus::Unverifiable
-        );
-        assert!(
-            snapshot
-                .current_migrations
-                .iter()
-                .all(|item| item.rollback_blocked)
-        );
-        assert_eq!(snapshot.blockers[0].code, "LEGACY_LOCK_ACTIVE");
-    }
-
-    #[test]
-    fn knex_requires_a_known_lock_state_before_import_planning() {
-        let snapshot = inspect_knex(SOURCE_IDENTITY, Vec::new(), None)
-            .expect("inspect Knex without lock metadata");
-        assert_eq!(snapshot.blockers[0].code, "LEGACY_LOCK_STATE_UNKNOWN");
-    }
-
-    #[test]
-    fn goose_derives_latest_applied_state_and_preserves_version_zero_event() {
-        let snapshot = inspect_goose(
-            SOURCE_IDENTITY,
-            vec![
-                GooseRow {
-                    id: 1,
-                    version_id: 0,
-                    is_applied: true,
-                    timestamp: Some("2026-10-01T00:00:00Z".to_owned()),
-                },
-                GooseRow {
-                    id: 2,
-                    version_id: 100,
-                    is_applied: true,
-                    timestamp: Some("2026-10-01T00:01:00Z".to_owned()),
-                },
-                GooseRow {
-                    id: 3,
-                    version_id: 200,
-                    is_applied: true,
-                    timestamp: Some("2026-10-01T00:02:00Z".to_owned()),
-                },
-                GooseRow {
-                    id: 4,
-                    version_id: 100,
-                    is_applied: false,
-                    timestamp: Some("2026-10-01T00:03:00Z".to_owned()),
-                },
-            ],
-        )
-        .expect("inspect Goose history");
-
-        assert_eq!(snapshot.events[0].state, LegacyEventState::Sentinel);
-        assert_eq!(snapshot.events[3].state, LegacyEventState::Reverted);
-        assert_eq!(snapshot.current_migrations.len(), 1);
-        assert_eq!(snapshot.current_migrations[0].original_version, "200");
-        assert_eq!(snapshot.current_migrations[0].original_identity, "3");
-    }
-
-    #[test]
-    fn sqlx_keeps_sha384_and_blocks_failed_history() {
-        let snapshot = inspect_sqlx(
-            SOURCE_IDENTITY,
-            vec![
-                SqlxRow {
-                    version: 42,
-                    description: "create_accounts".to_owned(),
-                    installed_on: Some("2026-10-03T00:00:00Z".to_owned()),
-                    success: true,
-                    checksum: vec![0xab; 48],
-                    execution_time_ms: 19,
-                },
-                SqlxRow {
-                    version: 43,
-                    description: "create_invoices".to_owned(),
-                    installed_on: None,
-                    success: false,
-                    checksum: vec![0xcd; 48],
-                    execution_time_ms: 0,
-                },
-            ],
-        )
-        .expect("inspect SQLx history");
-
-        assert_eq!(
-            snapshot.events[0].checksum.as_ref().unwrap().algorithm,
-            "sha384"
-        );
-        assert_eq!(
-            snapshot.events[0].checksum.as_ref().unwrap().value,
-            "ab".repeat(48)
-        );
-        assert_eq!(snapshot.current_migrations.len(), 1);
-        assert_eq!(
-            snapshot.current_migrations[0].verification_status,
-            VerificationStatus::Partial
-        );
-        assert_eq!(snapshot.blockers[0].code, "SQLX_MIGRATION_FAILED");
-    }
-
-    #[test]
-    fn import_digest_is_stable_and_sensitive_to_source_history_changes() {
-        let row = || KnexRow {
-            id: 1,
-            name: "001_create_users.js".to_owned(),
-            batch: 1,
-            migration_time: Some("2026-10-01T00:00:00Z".to_owned()),
-        };
-        let first = inspect_knex(SOURCE_IDENTITY, vec![row()], None).expect("first snapshot");
-        let repeat = inspect_knex(SOURCE_IDENTITY, vec![row()], None).expect("repeat snapshot");
-        let changed = inspect_knex(SOURCE_IDENTITY, vec![KnexRow { batch: 2, ..row() }], None)
-            .expect("changed snapshot");
-
-        assert_eq!(first.digest, repeat.digest);
-        assert_ne!(first.digest, changed.digest);
-    }
-
-    #[test]
-    fn malformed_legacy_source_rows_fail_closed() {
-        assert!(
-            inspect_knex(
-                SOURCE_IDENTITY,
-                vec![
-                    KnexRow {
-                        id: 1,
-                        name: "first".to_owned(),
-                        batch: 1,
-                        migration_time: None,
-                    },
-                    KnexRow {
-                        id: 1,
-                        name: "duplicate".to_owned(),
-                        batch: 1,
-                        migration_time: None,
-                    },
-                ],
-                None,
-            )
-            .is_err()
-        );
-        assert!(
-            inspect_sqlx(
-                SOURCE_IDENTITY,
-                vec![SqlxRow {
-                    version: 1,
-                    description: "broken_checksum".to_owned(),
-                    installed_on: None,
-                    success: true,
-                    checksum: vec![0; 32],
-                    execution_time_ms: 1,
-                }],
-            )
-            .is_err()
-        );
-    }
 }

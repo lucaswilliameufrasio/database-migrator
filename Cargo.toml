@@ -1,3 +1,14 @@
+[workspace]
+resolver = "3"
+members = [
+    ".",
+    "crates/database-migrator-core",
+    "crates/database-migrator-sqlite",
+    "crates/database-migrator-postgres",
+    "crates/database-migrator-mysql",
+]
+exclude = ["fuzz"]
+
 [package]
 name = "database-migrator"
 version = "1.0.0"
@@ -29,28 +40,25 @@ test-runner-fixture = []
 fuzzing-harness = []
 
 [dependencies]
+database-migrator-core = { version = "=1.0.0", path = "crates/database-migrator-core" }
+database-migrator-mysql = { version = "=1.0.0", path = "crates/database-migrator-mysql" }
+database-migrator-postgres = { version = "=1.0.0", path = "crates/database-migrator-postgres" }
+database-migrator-sqlite = { version = "=1.0.0", path = "crates/database-migrator-sqlite" }
 clap = { version = "4.6.7", features = ["derive"] }
 cap-std = "4.0.3"
 cap-fs-ext = { version = "4.0.3", optional = true }
-mysql_async = { version = "0.37.1", default-features = false, features = ["default-rustls-ring"] }
 rusqlite = { version = "0.41.1", features = ["bundled", "hooks"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"], optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"
-thiserror = "2.0.21"
 tempfile = "3.27.0"
-time = { version = "0.3.55", features = ["formatting", "parsing"] }
-rustls = { version = "0.23.0", default-features = false, features = ["ring", "std", "tls12"] }
-rustls-pki-types = "1.15.1"
 tokio = { version = "1.51.0", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
-tokio-postgres = "0.7.18"
-tokio-postgres-rustls = { version = "0.14.0", features = ["ring"] }
-toml = "1.1.8"
 uuid = { version = "1.29.0", features = ["v4"] }
-webpki-roots = "1.0.3"
 
 [dev-dependencies]
+mysql_async = { version = "0.37.1", default-features = false, features = ["default-rustls-ring"] }
+tokio-postgres = "0.7.18"
 
 [lints.rust]
 unsafe_code = "forbid"

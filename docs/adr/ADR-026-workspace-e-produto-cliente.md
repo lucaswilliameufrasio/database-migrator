@@ -1,6 +1,6 @@
 # ADR-026: Workspace do dbm e produto de cliente separado
 
-- **Status:** Aceita em 2026-11-14. A implementação ainda não começou.
+- **Status:** Aceita em 2026-11-14. O corte A1 está feito: drivers em crates internas com `publish = false`, e a facade depende das três. Features de engine ainda não existem.
 - **Data:** 2026-11-14
 
 ## Contexto

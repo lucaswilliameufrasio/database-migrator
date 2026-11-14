@@ -401,22 +401,34 @@ version = "1.0.0"
 dependencies = [
  "cap-std",
  "clap",
- "mysql_async",
+ "database-migrator-core",
+ "database-migrator-mysql",
+ "database-migrator-postgres",
+ "database-migrator-sqlite",
  "rusqlite",
- "rustls",
- "rustls-pki-types",
  "serde",
  "serde_json",
  "sha2 0.11.1",
  "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "database-migrator-core"
+version = "1.0.0"
+dependencies = [
+ "cap-std",
+ "clap",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
  "thiserror",
  "time",
  "tokio",
- "tokio-postgres",
- "tokio-postgres-rustls",
  "toml",
  "uuid",
- "webpki-roots",
 ]
 
 [[package]]
@@ -425,6 +437,41 @@ version = "0.0.0"
 dependencies = [
  "database-migrator",
  "libfuzzer-sys",
+]
+
+[[package]]
+name = "database-migrator-mysql"
+version = "1.0.0"
+dependencies = [
+ "database-migrator-core",
+ "mysql_async",
+ "sha2 0.11.1",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "database-migrator-postgres"
+version = "1.0.0"
+dependencies = [
+ "database-migrator-core",
+ "rustls",
+ "rustls-pki-types",
+ "sha2 0.11.1",
+ "tokio",
+ "tokio-postgres",
+ "tokio-postgres-rustls",
+ "uuid",
+ "webpki-roots",
+]
+
+[[package]]
+name = "database-migrator-sqlite"
+version = "1.0.0"
+dependencies = [
+ "database-migrator-core",
+ "rusqlite",
+ "tokio",
 ]
 
 [[package]]

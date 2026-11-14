@@ -1,0 +1,24 @@
+[package]
+name = "database-migrator-mysql"
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "MySQL and MariaDB driver for database-migrator"
+
+[dependencies]
+database-migrator-core = { version = "=1.0.0", path = "../database-migrator-core" }
+mysql_async = { version = "0.37.1", default-features = false, features = ["default-rustls-ring"] }
+sha2 = "0.11.1"
+tokio = { version = "1.51.0", features = ["macros", "rt-multi-thread"] }
+uuid = { version = "1.29.0", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
