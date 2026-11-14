@@ -12,7 +12,7 @@ pub mod dsl;
 pub mod engine;
 mod legacy;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "mysql"))]
 mod mysql_metadata_upgrade;
 pub mod registry;
 pub mod runner;

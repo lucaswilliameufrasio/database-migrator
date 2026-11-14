@@ -405,12 +405,14 @@ dependencies = [
  "database-migrator-mysql",
  "database-migrator-postgres",
  "database-migrator-sqlite",
+ "mysql_async",
  "rusqlite",
  "serde",
  "serde_json",
  "sha2 0.11.1",
  "tempfile",
  "tokio",
+ "tokio-postgres",
  "uuid",
 ]
 

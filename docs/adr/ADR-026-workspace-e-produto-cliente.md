@@ -1,6 +1,6 @@
 # ADR-026: Workspace do dbm e produto de cliente separado
 
-- **Status:** Aceita em 2026-11-14. O corte A1 está feito: drivers em crates internas com `publish = false`, e a facade depende das três. Features de engine ainda não existem.
+- **Status:** Aceita em 2026-11-14. Os cortes A1 e A2 estão feitos: drivers em crates internas com `publish = false`, e features `sqlite`, `postgres` e `mysql` ligadas por padrão. CLI, runner, importação legada e DSL ainda não são features.
 - **Data:** 2026-11-14
 
 ## Contexto
