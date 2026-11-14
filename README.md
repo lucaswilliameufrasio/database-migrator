@@ -137,6 +137,12 @@ with one entry per statement: `step_index`, `statement_hash`, `state`
 
 ## Library, runner, and AI
 
+The default features are the 1.0 contract: SQLite, PostgreSQL, MySQL and
+MariaDB, the `dbm` binary, the runner, legacy import, and the DSL. Every
+build keeps Tokio. `default-features = false` with `sqlite` is an opt-in
+embed. It leaves out the server drivers and `clap`, and it still links
+Tokio. See [docs/embed.md](docs/embed.md).
+
 `database_migrator::dsl` and `MigrationRegistry` are experimental. See
 `examples/sqlite_schema_dsl.rs` and `examples/sqlite_embedded_migration.rs`.
 Importing the library does not migrate anything.

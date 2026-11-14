@@ -1,11 +1,11 @@
 # Progresso pós-1.0
 
-> **Estado:** A3 feito em 2026-11-14. Próximo passo de código: A4.
+> **Estado:** A4 feito em 2026-11-14. Próximo passo: B1.
 > **Base:** tag `v1.0.0`, commit `9972f56adb1f01646096cb017c2c0657e8726e2c`.
 > **Decisão:** [ADR-026](adr/ADR-026-workspace-e-produto-cliente.md).
 > **Como atualizar:** no commit que entrega um item, mude o estado dessa linha e a data desta revisão. Não reescreva o histórico da V1 no plano mestre.
 
-**Revisão:** 2026-11-14. Próximo passo de código: A4.
+**Revisão:** 2026-11-14. Próximo passo: B1.
 
 O release 1.0.0 continua valendo como foi evidenciado: Linux x86_64, metadata 5, API pública congelada, crate não publicado. Este arquivo acompanha o que vem depois. G11 e G12 do plano mestre são o critério histórico da V1.
 
@@ -33,7 +33,7 @@ Estado usado nas tabelas: `pendente`, `em andamento`, `feito`.
 | A1 | Extrair SQLite, PostgreSQL e MySQL/MariaDB para crates internas com `publish = false`. A facade depende das três sempre. API, metadata 5, binário e comportamento iguais. Suíte atual verde em Linux. | feito |
 | A2 | Features `sqlite`, `postgres` e `mysql` ligadas por padrão. Provar que `default-features = false` com `sqlite` não compila `tokio-postgres` nem `mysql_async`. | feito |
 | A3 | CLI, runner, importação legada e DSL viram features ligadas por padrão. O binário `dbm` continua completo. | feito |
-| A4 | Documentar o embed opt-in e a diferença para o contrato da 1.0, inclusive o Tokio que permanece na facade. | pendente |
+| A4 | Documentar o embed opt-in e a diferença para o contrato da 1.0, inclusive o Tokio que permanece na facade. | feito |
 
 A1 criou `database-migrator-core`, `database-migrator-sqlite`, `database-migrator-postgres` e `database-migrator-mysql`, todas com `publish = false` e requisito `=1.0.0`. Nesse corte a facade ainda dependia das três, sem feature de engine. Metadata 5 e o binário `dbm` permanecem.
 
@@ -50,6 +50,8 @@ A3, em 2026-11-14, ligou `cli`, `runner`, `legacy` e `dsl` por padrão, junto co
 No mesmo perfil SQLite, o `cargo tree` também não contém `clap`. O grafo padrão ainda contém `clap`. O Clippy desse perfil, com `--bins --examples`, passou sem warning. O binário `dbm` e o exemplo DSL ficam de fora, porque `cli` e `dsl` estão desligadas. SQL e Rust no registry permanecem. `validate_database_info` continua no engine e devolve sucesso quando `dsl` está desligada. O modelo de inspeção legada continua na crate core. PostgreSQL e MySQL/MariaDB ainda compilam `inspect_legacy_history` quando a feature da engine está ligada. Desligar `legacy` na facade não remove esses métodos. `rusqlite` e Tokio continuam na facade.
 
 A suíte `--all-features` repetiu 162 passed e 49 ignored. Formatação, `git diff --check`, Clippy do workspace com `-D warnings`, o build, os dois exemplos SQLite e `scripts/supply-chain.sh` passaram. Os dois lockfiles não mudaram. A matriz de falha com servidor não rodou. O CI remoto não rodou.
+
+A4, em 2026-11-14, documentou esse embed em `docs/embed.md` e apontou o texto no README. O contrato da 1.0 continua o produto com as features padrão. O perfil `default-features = false` com `sqlite` continua sem `clap` e sem os drivers de servidor, e continua com Tokio e `rusqlite` na facade. A biblioteca de cliente continua sendo outro repositório, síncrona, sem este crate. Este corte não alterou código nem lockfile. A lista direta de dependências desse perfil foi relida. O gate de compilação não foi repetido.
 
 ### B. Plataformas no GitHub
 
