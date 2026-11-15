@@ -4293,7 +4293,15 @@ fn sqlite_journal_identity(path: &Path) -> Option<(u64, u64)> {
         use std::os::unix::fs::MetadataExt;
         Some((metadata.dev(), metadata.ino()))
     }
-    #[cfg(not(unix))]
+    // DELETE mode replaces the journal file. Creation time identifies that
+    // replacement while the failed-run transaction is still open. Size and
+    // last-write time also change inside one transaction.
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        Some((metadata.creation_time(), 0))
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = metadata;
         Some((0, 1))
