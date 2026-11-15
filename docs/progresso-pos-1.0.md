@@ -1,11 +1,11 @@
 # Progresso pós-1.0
 
-> **Estado:** C1 feito em 2026-11-15. Próximo passo: C2. B3 continua pendente.
+> **Estado:** C2 feito em 2026-11-15. Próximo passo: C3. B3 continua pendente.
 > **Base:** tag `v1.0.0`, commit `9972f56adb1f01646096cb017c2c0657e8726e2c`.
 > **Decisão:** [ADR-026](adr/ADR-026-workspace-e-produto-cliente.md).
 > **Como atualizar:** no commit que entrega um item, mude o estado dessa linha e a data desta revisão. Não reescreva o histórico da V1 no plano mestre.
 
-**Revisão:** 2026-11-15. Próximo passo: C2. B3 continua pendente.
+**Revisão:** 2026-11-15. Próximo passo: C3. B3 continua pendente.
 
 O release 1.0.0 continua valendo como foi evidenciado: Linux x86_64, metadata 5, API pública congelada, crate não publicado. Este arquivo acompanha o que vem depois. G11 e G12 do plano mestre são o critério histórico da V1.
 
@@ -70,7 +70,7 @@ B2, em 2026-11-15, registrou o job verde. O push `43743366222` no commit `96ff75
 | ID | Item | Estado |
 | --- | --- | --- |
 | C1 | Criar o repositório. Biblioteca SQLite síncrona, sem dependência de `database-migrator`. | feito |
-| C2 | Na abertura, antes de escrever: journal, checksum, geração do arquivo e execução desconhecida. Falha preserva o arquivo. | pendente |
+| C2 | Na abertura, antes de escrever: journal, checksum, geração do arquivo e execução desconhecida. Falha preserva o arquivo. | feito |
 | C3 | Doctor curto, sem linha de dado do usuário, seguro para anexar a um crash report. | pendente |
 | C4 | Um dono da conexão. Isolate e worker pedem a esse dono. | pendente |
 | C5 | Crate consumido pelo `*-core` do Jirau. | pendente |
@@ -78,6 +78,8 @@ B2, em 2026-11-15, registrou o job verde. O push `43743366222` no commit `96ff75
 | C7 | Autoria e teste de cadeia no `dbm`, a partir de cada schema já publicado, contra um SQLite descartável. | pendente |
 
 C1, em 2026-11-15, criou o repositório público [dbm-sqlite](https://github.com/lucaswilliameufrasio/dbm-sqlite), commit `f5deb4297c1eb8dd6ba4ab8aa0f9ce8139550598`. A crate `dbm-sqlite` 0.1.0 abre um arquivo SQLite na thread que chama e devolve a conexão. O SQLite vem embutido no `rusqlite` 0.41.1. `publish = false`. Edition 2024, Rust 1.89, toolchain do repositório 1.99.1. A consulta ao crates.io em 2026-11-15 respondeu que o crate `dbm-sqlite` não existe; nada foi publicado. O `cargo tree` nas arestas normal, dev e build não contém `tokio` nem `database-migrator`. No Linux local passaram formatação, `git diff --check`, Clippy com `-D warnings`, `cargo test --workspace --all-features --locked` (4 passed, 0 ignored, e 1 doctest) e o build. O push `43748371491` passou o job de qualidade em `ubuntu-latest`: 4 passed, 0 ignored, e 1 doctest. O journal continua no C2. B3 continua pendente.
+
+C2, em 2026-11-15, no commit `c3755bec2050bdcc32c3e86158719a617b8e670b` de [dbm-sqlite](https://github.com/lucaswilliameufrasio/dbm-sqlite). Na abertura, antes do SQL de migration, a biblioteca lê `dbm_sqlite_journal`. A versão é o timestamp UTC de 20 dígitos. O checksum é `sha256:raw:v1` dos bytes exatos do SQL. Os estados são `started`, `applied` e `failed`. Checksum divergente de versão aplicada fica visível e não escreve. Execução `started` ou estado desconhecido bloqueia escrita e não reaplica o SQL. Arquivo ausente é criado; diretório pai ausente não é. Falha de SQL faz rollback e grava `failed`: o arquivo que já existia permanece e a migration que falhou não deixa efeito. Não há `down`. O formato não é a metadata 5. No Linux local passaram formatação, `git diff --check`, Clippy com `-D warnings`, `cargo test --workspace --all-features --locked` (20 passed, 0 ignored, e 1 doctest) e o build. O `cargo tree` nas arestas normal, dev e build não contém `tokio` nem `database-migrator`. O push `43750828553` passou o job de qualidade em `ubuntu-latest`: 20 passed, 0 ignored, e 1 doctest. O próximo passo é o C3. B3 continua pendente.
 
 ## Fora deste acompanhamento
 
