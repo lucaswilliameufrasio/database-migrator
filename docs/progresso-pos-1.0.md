@@ -1,11 +1,11 @@
 # Progresso pós-1.0
 
-> **Estado:** B2 feito em 2026-11-15. Próximo passo: C1, quando o repositório do cliente for aberto. B3 continua pendente.
+> **Estado:** C1 feito em 2026-11-15. Próximo passo: C2. B3 continua pendente.
 > **Base:** tag `v1.0.0`, commit `9972f56adb1f01646096cb017c2c0657e8726e2c`.
 > **Decisão:** [ADR-026](adr/ADR-026-workspace-e-produto-cliente.md).
 > **Como atualizar:** no commit que entrega um item, mude o estado dessa linha e a data desta revisão. Não reescreva o histórico da V1 no plano mestre.
 
-**Revisão:** 2026-11-15. Próximo passo: C1, quando o repositório do cliente for aberto. B3 continua pendente.
+**Revisão:** 2026-11-15. Próximo passo: C2. B3 continua pendente.
 
 O release 1.0.0 continua valendo como foi evidenciado: Linux x86_64, metadata 5, API pública congelada, crate não publicado. Este arquivo acompanha o que vem depois. G11 e G12 do plano mestre são o critério histórico da V1.
 
@@ -15,7 +15,7 @@ O release 1.0.0 continua valendo como foi evidenciado: Linux x86_64, metadata 5,
 - O primeiro corte moveu os três drivers para crates internas com `publish = false`. As features `sqlite`, `postgres`, `mysql`, `cli`, `runner`, `legacy` e `dsl` estão ligadas por padrão. A feature `mysql` também cobre MariaDB. A feature `cli` puxa `runner` e `legacy`. O binário `dbm` exige `cli`, e o build padrão continua completo porque essa feature está no default.
 - `default-features = false` com `sqlite` não compila `tokio-postgres`, `mysql_async` nem `clap`. O contrato da 1.0 continua o produto completo, com as features padrão. Tokio e `rusqlite` permanecem na facade. Desligar `legacy` na facade não remove a inspeção legada do core nem dos drivers de PostgreSQL e MySQL/MariaDB.
 - A facade continua async e continua puxando Tokio. A ADR-014 deixa a conexão SQLite num worker dedicado; a sessão pública usa esse runtime. Uma biblioteca síncrona sem Tokio é outro produto.
-- O produto de cliente fica num repositório novo, ainda não criado. Ele não depende do crate `database-migrator`. Leva as invariantes do journal, não o formato 5 nem a aprovação de produção. Expo e React Native ficam de fora. Flutter desktop e Flutter web esperam binário e runtime declarados.
+- O produto de cliente fica no repositório público [dbm-sqlite](https://github.com/lucaswilliameufrasio/dbm-sqlite). Ele não depende do crate `database-migrator`. Leva as invariantes do journal, não o formato 5 nem a aprovação de produção. Expo e React Native ficam de fora. Flutter desktop e Flutter web esperam binário e runtime declarados.
 - O `dbm` continua sendo a ferramenta de autoria. O SQL de telefone usa outro diretório e o dialeto SQLite.
 - Ampliar plataforma é CI no GitHub, em runners macOS e Windows. A matriz de suporte só passa a citar o que um job verde cobriu. A matriz de falha com PostgreSQL, MySQL e MariaDB nesses sistemas é outra evidência.
 - Publicação no crates.io, asset de release no GitHub e migration de produção continuam fora até autorização explícita.
@@ -69,13 +69,15 @@ B2, em 2026-11-15, registrou o job verde. O push `43743366222` no commit `96ff75
 
 | ID | Item | Estado |
 | --- | --- | --- |
-| C1 | Criar o repositório. Biblioteca SQLite síncrona, sem dependência de `database-migrator`. | pendente |
+| C1 | Criar o repositório. Biblioteca SQLite síncrona, sem dependência de `database-migrator`. | feito |
 | C2 | Na abertura, antes de escrever: journal, checksum, geração do arquivo e execução desconhecida. Falha preserva o arquivo. | pendente |
 | C3 | Doctor curto, sem linha de dado do usuário, seguro para anexar a um crash report. | pendente |
 | C4 | Um dono da conexão. Isolate e worker pedem a esse dono. | pendente |
 | C5 | Crate consumido pelo `*-core` do Jirau. | pendente |
 | C6 | Plugin Flutter com `.so` por ABI Android, XCFramework iOS e checksums. `flutter pub get` baixa o binário. Editar SQL não recompila Rust. | pendente |
 | C7 | Autoria e teste de cadeia no `dbm`, a partir de cada schema já publicado, contra um SQLite descartável. | pendente |
+
+C1, em 2026-11-15, criou o repositório público [dbm-sqlite](https://github.com/lucaswilliameufrasio/dbm-sqlite), commit `f5deb4297c1eb8dd6ba4ab8aa0f9ce8139550598`. A crate `dbm-sqlite` 0.1.0 abre um arquivo SQLite na thread que chama e devolve a conexão. O SQLite vem embutido no `rusqlite` 0.41.1. `publish = false`. Edition 2024, Rust 1.89, toolchain do repositório 1.99.1. A consulta ao crates.io em 2026-11-15 respondeu que o crate `dbm-sqlite` não existe; nada foi publicado. O `cargo tree` nas arestas normal, dev e build não contém `tokio` nem `database-migrator`. No Linux local passaram formatação, `git diff --check`, Clippy com `-D warnings`, `cargo test --workspace --all-features --locked` (4 passed, 0 ignored, e 1 doctest) e o build. O push `43748371491` passou o job de qualidade em `ubuntu-latest`: 4 passed, 0 ignored, e 1 doctest. O journal continua no C2. B3 continua pendente.
 
 ## Fora deste acompanhamento
 
