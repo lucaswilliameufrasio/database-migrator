@@ -2,8 +2,9 @@
 
 Release 1.0.0 declares Linux x86_64 and the server lines below. The 2026-11-13
 revalidation of the current commit is recorded after the historical runs. Those
-older paragraphs stay as written. macOS, Windows, and any server version not
-listed here are outside this release.
+older paragraphs stay as written. Server versions not listed here stay outside
+that release. The later SQLite CI on macOS and Windows is in the operating-system
+row and does not replace the 1.0.0 Linux evidence.
 
 ## Database servers
 
@@ -35,8 +36,8 @@ matrix or security review.
 | Area | Declared/current evidence | Qualification |
 |---|---|---|
 | Rust | `rust-version = 1.89`; development and CI toolchain 1.99.1; `cargo +1.89.0 test --workspace --all-features --locked` passed on 2026-11-08 | Full workspace tests are verified on the declared MSRV; the complete format/Clippy/build/examples/supply-chain gate is recorded on 1.99.1, not 1.89. |
-| Operating system | GitHub CI uses `ubuntu-latest`; local work is Linux x86_64 | macOS and Windows builds/tests are not verified by the current CI. |
-| Optional AI | `ai` Cargo feature; optional `cap-std`/`cap-fs-ext` 4.0.3; fake HTTP/provider tests; Unix regression tests reject final and intermediate symlinks swapped after path canonicalization | Local Linux tests only; no real AI provider was called. Provider behavior, availability, output quality, and macOS/Windows filesystem behavior are not certified. Under the aggressive post-fix path-race reproduction all 160 previews failed closed, so it established no successful-preview rate under contention. |
+| Operating system | Release 1.0.0: GitHub CI `ubuntu-latest`, local work Linux x86_64. On 2026-11-15, commit `96ff75eff5e698719eb3abefb0158ba2287cfdd9`, push run `43743366222`, job `quality-platforms` passed on `macos-latest` (image `macos-26-arm64`) and `windows-latest` (image `windows-2025`). Each runner ran `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, `cargo test --workspace --all-features --locked`, `cargo build --workspace --all-features --locked`, and examples `sqlite_embedded_migration` and `sqlite_schema_dsl`. | No database service and no server URL. macOS reported 162 passed and 49 ignored. Windows reported 152 passed and 49 ignored; ten Unix-only tests are not compiled on Windows. PostgreSQL, MySQL, and MariaDB stay unverified on those systems. This row does not replace the 1.0.0 Linux x86_64 release evidence. |
+| Optional AI | `ai` Cargo feature; optional `cap-std`/`cap-fs-ext` 4.0.3; fake HTTP/provider tests; Unix regression tests reject final and intermediate symlinks swapped after path canonicalization | The 2026-11-15 platform job ran the all-features suite, including the AI tests, on macOS and Windows. The Unix symlink regressions run on macOS and are not compiled on Windows. No real AI provider was called. Provider behavior, availability, and output quality are not certified. Under the aggressive post-fix path-race reproduction all 160 previews failed closed, so it established no successful-preview rate under contention. |
 | Fuzzing | Scanner/parser targets and seed corpus are under `fuzz/`; both targets completed bounded runs on 2026-11-07 with retained generated corpora | Nightly Rust and `cargo-fuzz` were used in a rootless, network-disabled sandbox. `sql_scanner`: 2,309,020 executions; `migration_parser`: 2,404,475; 301 seconds each with configured 300-second limit. No crash artifacts were reported. This is bounded evidence, not proof of correctness; details and retained-corpus manifest are in `supply-chain.md`. |
 
 The server matrix is limited to the exact versions above and the behaviors

@@ -20,7 +20,8 @@ Upgrades are in [docs/upgrade-guide.md](docs/upgrade-guide.md).
 PostgreSQL 18.6, MySQL 8.4.13, and MariaDB 11.8.9 were revalidated together
 on 2026-11-13. MySQL 8.4 is the current LTS line with the broad suite.
 MariaDB 11.8 is the newest line with that same suite. MariaDB 12.3 has not
-been run. macOS and Windows are not part of this release.
+been run. Release 1.0.0 remains Linux x86_64. Current CI also runs the SQLite
+suite on macOS and Windows; the support matrix records the limit.
 
 ## Quick start
 
