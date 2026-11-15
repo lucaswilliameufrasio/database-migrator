@@ -1,11 +1,11 @@
 # Progresso pós-1.0
 
-> **Estado:** C3 feito em 2026-11-15. Próximo passo: C4. B3 continua pendente.
+> **Estado:** C4 feito em 2026-11-15. Próximo passo: C5. B3 continua pendente.
 > **Base:** tag `v1.0.0`, commit `9972f56adb1f01646096cb017c2c0657e8726e2c`.
 > **Decisão:** [ADR-026](adr/ADR-026-workspace-e-produto-cliente.md).
 > **Como atualizar:** no commit que entrega um item, mude o estado dessa linha e a data desta revisão. Não reescreva o histórico da V1 no plano mestre.
 
-**Revisão:** 2026-11-15. Próximo passo: C4. B3 continua pendente.
+**Revisão:** 2026-11-15. Próximo passo: C5. B3 continua pendente.
 
 O release 1.0.0 continua valendo como foi evidenciado: Linux x86_64, metadata 5, API pública congelada, crate não publicado. Este arquivo acompanha o que vem depois. G11 e G12 do plano mestre são o critério histórico da V1.
 
@@ -72,7 +72,7 @@ B2, em 2026-11-15, registrou o job verde. O push `43743366222` no commit `96ff75
 | C1 | Criar o repositório. Biblioteca SQLite síncrona, sem dependência de `database-migrator`. | feito |
 | C2 | Na abertura, antes de escrever: journal, checksum, geração do arquivo e execução desconhecida. Falha preserva o arquivo. | feito |
 | C3 | Doctor curto, sem linha de dado do usuário, seguro para anexar a um crash report. | feito |
-| C4 | Um dono da conexão. Isolate e worker pedem a esse dono. | pendente |
+| C4 | Um dono da conexão. Isolate e worker pedem a esse dono. | feito |
 | C5 | Crate consumido pelo `*-core` do Jirau. | pendente |
 | C6 | Plugin Flutter com `.so` por ABI Android, XCFramework iOS e checksums. `flutter pub get` baixa o binário. Editar SQL não recompila Rust. | pendente |
 | C7 | Autoria e teste de cadeia no `dbm`, a partir de cada schema já publicado, contra um SQLite descartável. | pendente |
@@ -82,6 +82,8 @@ C1, em 2026-11-15, criou o repositório público [dbm-sqlite](https://github.com
 C2, em 2026-11-15, no commit `c3755bec2050bdcc32c3e86158719a617b8e670b` de [dbm-sqlite](https://github.com/lucaswilliameufrasio/dbm-sqlite). Na abertura, antes do SQL de migration, a biblioteca lê `dbm_sqlite_journal`. A versão é o timestamp UTC de 20 dígitos. O checksum é `sha256:raw:v1` dos bytes exatos do SQL. Os estados são `started`, `applied` e `failed`. Checksum divergente de versão aplicada fica visível e não escreve. Execução `started` ou estado desconhecido bloqueia escrita e não reaplica o SQL. Arquivo ausente é criado; diretório pai ausente não é. Falha de SQL faz rollback e grava `failed`: o arquivo que já existia permanece e a migration que falhou não deixa efeito. Não há `down`. O formato não é a metadata 5. No Linux local passaram formatação, `git diff --check`, Clippy com `-D warnings`, `cargo test --workspace --all-features --locked` (20 passed, 0 ignored, e 1 doctest) e o build. O `cargo tree` nas arestas normal, dev e build não contém `tokio` nem `database-migrator`. O push `43750828553` passou o job de qualidade em `ubuntu-latest`: 20 passed, 0 ignored, e 1 doctest. O próximo passo é o C3. B3 continua pendente.
 
 C3, em 2026-11-15, no commit `942e62234f82d9e3fad40b899bdffa54833b1c23` de [dbm-sqlite](https://github.com/lucaswilliameufrasio/dbm-sqlite). `doctor` só lê. O texto leva a versão da crate, a versão do SQLite embutido, a versão do aplicativo quando ela cabe numa linha curta, a cabeça do journal, o checksum e o estado da execução. O caminho, o SQL, o nome das tabelas e as linhas do aplicativo ficam de fora. Arquivo ausente não é criado e symlink não é seguido. Não há reconciliação. No Linux local passaram formatação, `git diff --check`, Clippy com `-D warnings`, `cargo test --workspace --all-features --locked` (33 passed, 0 ignored, e 2 doctests) e o build. O `cargo tree` nas arestas normal, dev e build não contém `tokio` nem `database-migrator`. O push `43752385862` passou o job de qualidade em `ubuntu-latest`: 33 passed, 0 ignored, e 2 doctests. O próximo passo é o C4. B3 continua pendente.
+
+C4, em 2026-11-15, no commit `8fe296fd5c7517a9590e388c2ec38c217910b0b5` de [dbm-sqlite](https://github.com/lucaswilliameufrasio/dbm-sqlite). `open` migra e fica com a única conexão de escrita. Um clone pede essa conexão. `Database::call` é o pedido do worker: não abre outra conexão e não cria arquivo quando não há dono. Um segundo `open`, neste processo ou em outro, devolve `Owned` e não escreve. A trava entre processos fica em `caminho.dbm-owner` e solta quando o último dono cai ou o processo morre. `doctor` continua só leitura. No Linux local passaram formatação, `git diff --check`, Clippy com `-D warnings`, `cargo test --workspace --all-features --locked` (38 passed, 0 ignored, e 2 doctests) e o build. O `cargo tree` nas arestas normal, dev e build não contém `tokio` nem `database-migrator`. O push `43754753562` passou o job de qualidade em `ubuntu-latest`: 38 passed, 0 ignored, e 2 doctests. O próximo passo é o C5. B3 continua pendente.
 
 ## Fora deste acompanhamento
 
