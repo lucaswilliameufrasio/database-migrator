@@ -176,6 +176,7 @@ fn pg_target_url(base_url: &str, schema: &str) -> Result<String, String> {
                     .map(|address| address.is_loopback())
                     .unwrap_or(false)
         }
+        #[cfg(unix)]
         Host::Unix(_) => true,
     }) && config.get_hostaddrs().iter().all(IpAddr::is_loopback);
     require(

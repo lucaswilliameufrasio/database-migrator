@@ -5733,6 +5733,7 @@ mod tests {
                 Host::Tcp(host) => host
                     .parse::<IpAddr>()
                     .is_ok_and(|address| address.is_loopback()),
+                #[cfg(unix)]
                 Host::Unix(_) => true,
             }
         }));
@@ -6097,6 +6098,7 @@ mod tests {
                 Host::Tcp(host) => host
                     .parse::<IpAddr>()
                     .is_ok_and(|address| address.is_loopback()),
+                #[cfg(unix)]
                 Host::Unix(_) => true,
             }
         }));
@@ -6345,6 +6347,7 @@ mod tests {
                 Host::Tcp(host) => host
                     .parse::<IpAddr>()
                     .is_ok_and(|address| address.is_loopback()),
+                #[cfg(unix)]
                 Host::Unix(_) => true,
             }
         }));
@@ -6610,6 +6613,7 @@ mod tests {
                 Host::Tcp(host) => host
                     .parse::<IpAddr>()
                     .is_ok_and(|address| address.is_loopback()),
+                #[cfg(unix)]
                 Host::Unix(_) => true,
             }
         }));
@@ -6899,6 +6903,7 @@ mod tests {
                 Host::Tcp(host) => host
                     .parse::<IpAddr>()
                     .is_ok_and(|address| address.is_loopback()),
+                #[cfg(unix)]
                 Host::Unix(_) => true,
             }
         }));

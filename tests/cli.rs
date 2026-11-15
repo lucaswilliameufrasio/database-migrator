@@ -3535,8 +3535,10 @@ fn start_postgres_statement_hold_proxy(
         .get_hosts()
         .first()
         .expect("test database URL selects one loopback host");
-    let Host::Tcp(target_host) = target_host else {
-        panic!("statement proxy requires a TCP loopback test target");
+    let target_host = match target_host {
+        Host::Tcp(target_host) => target_host,
+        #[cfg(unix)]
+        Host::Unix(_) => panic!("statement proxy requires a TCP loopback test target"),
     };
     let target_ip = IpAddr::from_str(target_host)
         .expect("statement proxy test target must use a literal loopback address");
@@ -4804,6 +4806,7 @@ fn cli_runs_postgres_transactional_and_concurrent_index_migrations() {
     assert!(parsed.get_hosts().iter().all(|host| match host {
         Host::Tcp(host) if host.eq_ignore_ascii_case("localhost") => true,
         Host::Tcp(host) => IpAddr::from_str(host).is_ok_and(|address| address.is_loopback()),
+        #[cfg(unix)]
         Host::Unix(_) => true,
     }));
     assert!(parsed.get_hostaddrs().iter().all(IpAddr::is_loopback));
@@ -4949,6 +4952,7 @@ fn cli_process_death_at_postgres_recovery_boundaries_keeps_runs_unresolved() {
     assert!(parsed.get_hosts().iter().all(|host| match host {
         Host::Tcp(host) if host.eq_ignore_ascii_case("localhost") => true,
         Host::Tcp(host) => IpAddr::from_str(host).is_ok_and(|address| address.is_loopback()),
+        #[cfg(unix)]
         Host::Unix(_) => true,
     }));
     assert!(parsed.get_hostaddrs().iter().all(IpAddr::is_loopback));
@@ -5540,6 +5544,7 @@ fn cli_process_death_after_postgres_intent_before_sql_keeps_the_intent() {
     assert!(parsed.get_hosts().iter().all(|host| match host {
         Host::Tcp(host) if host.eq_ignore_ascii_case("localhost") => true,
         Host::Tcp(host) => IpAddr::from_str(host).is_ok_and(|address| address.is_loopback()),
+        #[cfg(unix)]
         Host::Unix(_) => true,
     }));
     assert!(parsed.get_hostaddrs().iter().all(IpAddr::is_loopback));
@@ -5697,6 +5702,7 @@ fn cli_postgres_competing_writers_same_namespace_are_serialized() {
     assert!(parsed.get_hosts().iter().all(|host| match host {
         Host::Tcp(host) if host.eq_ignore_ascii_case("localhost") => true,
         Host::Tcp(host) => IpAddr::from_str(host).is_ok_and(|address| address.is_loopback()),
+        #[cfg(unix)]
         Host::Unix(_) => true,
     }));
     assert!(parsed.get_hostaddrs().iter().all(IpAddr::is_loopback));
@@ -5864,6 +5870,7 @@ fn cli_postgres_metadata_bootstrap_failure_rolls_back_all_reserved_tables() {
     assert!(parsed.get_hosts().iter().all(|host| match host {
         Host::Tcp(host) if host.eq_ignore_ascii_case("localhost") => true,
         Host::Tcp(host) => IpAddr::from_str(host).is_ok_and(|address| address.is_loopback()),
+        #[cfg(unix)]
         Host::Unix(_) => true,
     }));
     assert!(parsed.get_hostaddrs().iter().all(IpAddr::is_loopback));

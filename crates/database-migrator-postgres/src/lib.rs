@@ -2702,6 +2702,7 @@ fn all_hosts_are_local(config: &PostgresConfig) -> bool {
                         .get(index)
                         .is_some_and(IpAddr::is_loopback)
             }
+            #[cfg(unix)]
             Host::Unix(_) => true,
         })
         && config.get_hostaddrs().iter().all(IpAddr::is_loopback)
@@ -2714,6 +2715,7 @@ fn postgres_target_identity(config: &PostgresConfig) -> String {
         let port = ports.get(index).copied().unwrap_or_default();
         let host = match host {
             Host::Tcp(host) => format!("tcp:{host}:{port}"),
+            #[cfg(unix)]
             Host::Unix(path) => format!("unix:{}:{port}", path.display()),
         };
         hosts.push(host);
