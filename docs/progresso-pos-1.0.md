@@ -1,11 +1,11 @@
 # Progresso pós-1.0
 
-> **Estado:** C4 feito em 2026-11-15. Próximo passo: C5. B3 continua pendente.
+> **Estado:** C5 feito em 2026-11-15. Próximo passo: C6. B3 continua pendente.
 > **Base:** tag `v1.0.0`, commit `9972f56adb1f01646096cb017c2c0657e8726e2c`.
 > **Decisão:** [ADR-026](adr/ADR-026-workspace-e-produto-cliente.md).
 > **Como atualizar:** no commit que entrega um item, mude o estado dessa linha e a data desta revisão. Não reescreva o histórico da V1 no plano mestre.
 
-**Revisão:** 2026-11-15. Próximo passo: C5. B3 continua pendente.
+**Revisão:** 2026-11-15. Próximo passo: C6. B3 continua pendente.
 
 O release 1.0.0 continua valendo como foi evidenciado: Linux x86_64, metadata 5, API pública congelada, crate não publicado. Este arquivo acompanha o que vem depois. G11 e G12 do plano mestre são o critério histórico da V1.
 
@@ -73,7 +73,7 @@ B2, em 2026-11-15, registrou o job verde. O push `43743366222` no commit `96ff75
 | C2 | Na abertura, antes de escrever: journal, checksum, geração do arquivo e execução desconhecida. Falha preserva o arquivo. | feito |
 | C3 | Doctor curto, sem linha de dado do usuário, seguro para anexar a um crash report. | feito |
 | C4 | Um dono da conexão. Isolate e worker pedem a esse dono. | feito |
-| C5 | Crate consumido pelo `*-core` do Jirau. | pendente |
+| C5 | Crate consumido pelo `*-core` do Jirau. | feito |
 | C6 | Plugin Flutter com `.so` por ABI Android, XCFramework iOS e checksums. `flutter pub get` baixa o binário. Editar SQL não recompila Rust. | pendente |
 | C7 | Autoria e teste de cadeia no `dbm`, a partir de cada schema já publicado, contra um SQLite descartável. | pendente |
 
@@ -84,6 +84,8 @@ C2, em 2026-11-15, no commit `c3755bec2050bdcc32c3e86158719a617b8e670b` de [dbm-
 C3, em 2026-11-15, no commit `942e62234f82d9e3fad40b899bdffa54833b1c23` de [dbm-sqlite](https://github.com/lucaswilliameufrasio/dbm-sqlite). `doctor` só lê. O texto leva a versão da crate, a versão do SQLite embutido, a versão do aplicativo quando ela cabe numa linha curta, a cabeça do journal, o checksum e o estado da execução. O caminho, o SQL, o nome das tabelas e as linhas do aplicativo ficam de fora. Arquivo ausente não é criado e symlink não é seguido. Não há reconciliação. No Linux local passaram formatação, `git diff --check`, Clippy com `-D warnings`, `cargo test --workspace --all-features --locked` (33 passed, 0 ignored, e 2 doctests) e o build. O `cargo tree` nas arestas normal, dev e build não contém `tokio` nem `database-migrator`. O push `43752385862` passou o job de qualidade em `ubuntu-latest`: 33 passed, 0 ignored, e 2 doctests. O próximo passo é o C4. B3 continua pendente.
 
 C4, em 2026-11-15, no commit `8fe296fd5c7517a9590e388c2ec38c217910b0b5` de [dbm-sqlite](https://github.com/lucaswilliameufrasio/dbm-sqlite). `open` migra e fica com a única conexão de escrita. Um clone pede essa conexão. `Database::call` é o pedido do worker: não abre outra conexão e não cria arquivo quando não há dono. Um segundo `open`, neste processo ou em outro, devolve `Owned` e não escreve. A trava entre processos fica em `caminho.dbm-owner` e solta quando o último dono cai ou o processo morre. `doctor` continua só leitura. No Linux local passaram formatação, `git diff --check`, Clippy com `-D warnings`, `cargo test --workspace --all-features --locked` (38 passed, 0 ignored, e 2 doctests) e o build. O `cargo tree` nas arestas normal, dev e build não contém `tokio` nem `database-migrator`. O push `43754753562` passou o job de qualidade em `ubuntu-latest`: 38 passed, 0 ignored, e 2 doctests. O próximo passo é o C5. B3 continua pendente.
+
+C5, em 2026-11-15, no commit `371a49a5ff854b4eab23f0cfbf05afd2e8e2dd84` do [Jirau](https://github.com/lucaswilliameufrasio/jirau). O `*-core` depende do [dbm-sqlite](https://github.com/lucaswilliameufrasio/dbm-sqlite) no commit `8fe296fd5c7517a9590e388c2ec38c217910b0b5`, por git, sem crates.io. O core abre o arquivo, migra e só então entrega a conexão. A UI não vê o SQL. Um segundo `open` do mesmo caminho, enquanto esse dono vive, não escreve. `in_memory` grava um arquivo temporário único e apaga o diretório quando o dono cai. O caminho é resolvido antes do `open`: o `dbm-sqlite` recusa um componente que é symlink, e no Apple `/var` é um. O cofre continua cifrado. O journal nasce vazio e o esquema, a verificação da chave e a migração do texto puro rodam na conexão. Um arquivo que já tem tabelas e não tem journal é lido, trocado por um banco com journal, e a cópia anterior só é apagada depois que a cópia cifrada existe. A versão do Jirau permanece 0.4.1 e a do template permanece 0.4.0: `jirau new` já gera esse core; `jirau upgrade` não oferece a mudança a um projeto que já está na 0.4.0. O `cargo tree` nas arestas normal, dev e build contém `dbm-sqlite` e `rusqlite` e não contém `tokio` nem `database-migrator`. No Linux local passaram formatação, Clippy com `-D warnings`, os testes de scaffold e o teste de integração que compila os dois cores. O push `43763083222` passou em `ubuntu-latest` e `macos-latest`: 26 passed na unidade e 7 passed na integração, 0 ignored. O próximo passo é o C6. B3 continua pendente.
 
 ## Fora deste acompanhamento
 
