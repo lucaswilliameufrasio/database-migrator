@@ -4286,25 +4286,30 @@ fn killing_cli_during_a_transaction_keeps_the_next_write_blocked() {
     );
 }
 
-fn sqlite_journal_identity(path: &Path) -> Option<(u64, u64)> {
-    let metadata = fs::metadata(path).ok()?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        Some((metadata.dev(), metadata.ino()))
+enum SqliteImmediateProbe {
+    Busy,
+    Acquired(rusqlite::Connection),
+}
+
+fn probe_sqlite_immediate_transaction(path: &Path) -> SqliteImmediateProbe {
+    let connection = rusqlite::Connection::open(path).expect("open SQLite write-lock probe");
+    connection
+        .busy_timeout(Duration::ZERO)
+        .expect("disable SQLite busy waiting on the write-lock probe");
+    match connection.execute_batch("BEGIN IMMEDIATE") {
+        Ok(()) => SqliteImmediateProbe::Acquired(connection),
+        Err(error) if sqlite_failure_is_lock(&error) => SqliteImmediateProbe::Busy,
+        Err(error) => panic!("probe SQLite immediate transaction: {error}"),
     }
-    // DELETE mode replaces the journal file. Creation time identifies that
-    // replacement while the failed-run transaction is still open. Size and
-    // last-write time also change inside one transaction.
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        Some((metadata.creation_time(), 0))
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = metadata;
-        Some((0, 1))
+}
+
+fn sqlite_failure_is_lock(error: &rusqlite::Error) -> bool {
+    match error {
+        rusqlite::Error::SqliteFailure(failure, _) => matches!(
+            failure.code,
+            rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+        ),
+        _ => false,
     }
 }
 
@@ -4383,9 +4388,12 @@ fn sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved() {
 
     let deadline = Instant::now() + Duration::from_secs(45);
     let mut durable_started_run = false;
-    let mut migration_journal_seen = false;
-    let mut migration_journal_identity = None;
-    let mut rollback_seen = false;
+    // The migration SQL is short. The failed-run update is held open by a
+    // trigger. Windows cannot stat the rollback journal while SQLite has it
+    // open, so a write lock that outlives the SQL is that failed-run
+    // transaction. A lock taken after the SQL releases is the same gap.
+    let mut saw_migration_writer = false;
+    let mut migration_writer_busy_since: Option<Instant> = None;
     let mut failed_run_persistence_observed = false;
     let mut failed_run_commit_blocker = None;
     while Instant::now() < deadline {
@@ -4394,7 +4402,7 @@ fn sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved() {
                 .wait_with_output()
                 .expect("collect SQLite migration output after early exit");
             panic!(
-                "SQLite migration exited before rollback persistence window: {status}; started={durable_started_run}, migration journal={migration_journal_seen}, rollback={rollback_seen}; stdout={}, stderr={}",
+                "SQLite migration exited before rollback persistence window: {status}; started={durable_started_run}, writer={saw_migration_writer}; stdout={}, stderr={}",
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
             );
@@ -4415,31 +4423,31 @@ fn sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved() {
         }
 
         if durable_started_run {
-            let journal_identity = sqlite_journal_identity(&journal_path);
-            if migration_journal_identity.is_none() {
-                if journal_identity.is_some() {
-                    migration_journal_identity = journal_identity;
-                    migration_journal_seen = true;
+            match probe_sqlite_immediate_transaction(&database_path) {
+                SqliteImmediateProbe::Busy => {
+                    saw_migration_writer = true;
+                    let busy_since = match migration_writer_busy_since {
+                        Some(busy_since) => busy_since,
+                        None => {
+                            let busy_since = Instant::now();
+                            migration_writer_busy_since = Some(busy_since);
+                            busy_since
+                        }
+                    };
+                    if busy_since.elapsed() >= Duration::from_secs(1) {
+                        failed_run_persistence_observed = true;
+                        break;
+                    }
                 }
-            } else if journal_identity != migration_journal_identity {
-                rollback_seen = true;
-                if journal_identity.is_none() && failed_run_commit_blocker.is_none() {
-                    let blocker = rusqlite::Connection::open(&database_path)
-                        .expect("open SQLite rollback observer");
-                    blocker
-                        .execute_batch("BEGIN DEFERRED")
-                        .expect("begin SQLite rollback observation transaction");
-                    let _: i64 = blocker
-                        .query_row("SELECT COUNT(*) FROM schema_migration_runs", [], |row| {
-                            row.get(0)
-                        })
-                        .expect("hold a SQLite read lock after migration rollback");
-                    failed_run_commit_blocker = Some(blocker);
+                SqliteImmediateProbe::Acquired(connection) => {
+                    if saw_migration_writer {
+                        failed_run_commit_blocker = Some(connection);
+                        failed_run_persistence_observed = true;
+                        break;
+                    }
+                    drop(connection);
+                    migration_writer_busy_since = None;
                 }
-            }
-            if rollback_seen && journal_identity.is_some() {
-                failed_run_persistence_observed = true;
-                break;
             }
         }
         thread::sleep(Duration::from_millis(1));
@@ -4451,7 +4459,7 @@ fn sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved() {
             .wait_with_output()
             .expect("collect SQLite process after rollback-window timeout");
         panic!(
-            "did not observe SQLite rollback followed by failed-run persistence; started={durable_started_run}, migration journal={migration_journal_seen}, rollback={rollback_seen}; stdout={}, stderr={}",
+            "did not observe SQLite rollback followed by failed-run persistence; started={durable_started_run}, writer={saw_migration_writer}; stdout={}, stderr={}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
