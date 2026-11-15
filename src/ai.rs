@@ -1335,19 +1335,20 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
-    use cap_std::ambient_authority;
-    use cap_std::fs::Dir;
+    #[cfg(unix)]
+    use cap_std::{ambient_authority, fs::Dir};
     use serde_json::{Value, json};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
     use tokio::task::JoinHandle;
 
     use super::{
-        AiAction, AiExecutionOptions, AiProvider, MAX_CONTEXT_FILE_BYTES, MigrationProposal,
-        OpenAiCompatibleProvider, ProposalFile, ProposalFileType, ReviewReport, build_messages,
-        parse_and_validate_response, read_context_file_from_canonical, redact_json,
-        redact_sensitive_text, safe_sql_basename, validate_approved_endpoint,
+        AiAction, AiExecutionOptions, AiProvider, MigrationProposal, OpenAiCompatibleProvider,
+        ProposalFile, ProposalFileType, ReviewReport, build_messages, parse_and_validate_response,
+        redact_json, redact_sensitive_text, safe_sql_basename, validate_approved_endpoint,
     };
+    #[cfg(unix)]
+    use super::{MAX_CONTEXT_FILE_BYTES, read_context_file_from_canonical};
     use crate::config::{
         AiConfig, AiProfileConfig, Environment, ExecutionConfig, LoadedConfig, ProjectDirectory,
         SourceDir, TargetConfig,
@@ -1558,15 +1559,15 @@ mod tests {
             .is_err()
         );
 
-        let source = directory.path().join("migrations/versioned");
-        let outside_file = outside.path().join("linked.sql");
-        fs::write(
-            &outside_file,
-            "-- dbm:up\nCREATE TABLE leaked (id INTEGER);\n",
-        )
-        .expect("write external context file");
         #[cfg(unix)]
         {
+            let source = directory.path().join("migrations/versioned");
+            let outside_file = outside.path().join("linked.sql");
+            fs::write(
+                &outside_file,
+                "-- dbm:up\nCREATE TABLE leaked (id INTEGER);\n",
+            )
+            .expect("write external context file");
             std::os::unix::fs::symlink(&outside_file, source.join("linked.sql"))
                 .expect("create out-of-project context symlink");
             assert!(

@@ -697,13 +697,15 @@ fn snapshot_runner(path: &Path) -> Result<RunnerSnapshot> {
     let parent = path.parent().ok_or_else(|| {
         DbmError::Configuration("configured runner path must have a parent directory".to_owned())
     })?;
-    let mut directory_builder = TempDirBuilder::new();
+    let directory_builder = TempDirBuilder::new();
     #[cfg(unix)]
-    {
+    let directory_builder = {
         use std::os::unix::fs::PermissionsExt;
 
+        let mut directory_builder = directory_builder;
         directory_builder.permissions(fs::Permissions::from_mode(0o700));
-    }
+        directory_builder
+    };
     let directory = directory_builder.tempdir_in(parent).map_err(|_| {
         DbmError::Execution("could not create a private compiled runner snapshot".to_owned())
     })?;
@@ -1333,8 +1335,8 @@ mod tests {
 
     use super::{
         ExecuteRequest, MAX_FRAME_BYTES, RUNNER_PROTOCOL_VERSION, RunnerOperation, WireAction,
-        operation_from_wire, production_execute_authorization, read_frame, snapshot_runner,
-        validate_action_shape, validate_execute,
+        operation_from_wire, production_execute_authorization, read_frame, validate_action_shape,
+        validate_execute,
     };
 
     #[test]
@@ -1368,6 +1370,8 @@ mod tests {
         use std::fs;
         use std::os::unix::fs::PermissionsExt;
         use std::process::Command;
+
+        use super::snapshot_runner;
 
         let test_executable = std::env::current_exe().expect("resolve test executable");
         let executable_directory = test_executable
