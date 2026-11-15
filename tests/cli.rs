@@ -3535,11 +3535,13 @@ fn start_postgres_statement_hold_proxy(
         .get_hosts()
         .first()
         .expect("test database URL selects one loopback host");
+    #[cfg(unix)]
     let target_host = match target_host {
         Host::Tcp(target_host) => target_host,
-        #[cfg(unix)]
         Host::Unix(_) => panic!("statement proxy requires a TCP loopback test target"),
     };
+    #[cfg(not(unix))]
+    let Host::Tcp(target_host) = target_host;
     let target_ip = IpAddr::from_str(target_host)
         .expect("statement proxy test target must use a literal loopback address");
     assert!(target_ip.is_loopback());
