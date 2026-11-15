@@ -552,7 +552,6 @@ fn read_context_file(
         .map_err(|error| DbmError::io(path.display(), error))?;
 
     read_context_file_from_canonical(
-        project_root,
         &project_directory,
         config,
         &canonical_relative_path,
@@ -563,7 +562,6 @@ fn read_context_file(
 }
 
 fn read_context_file_from_canonical(
-    project_root: &Path,
     project_directory: &Dir,
     config: &LoadedConfig,
     canonical_relative_path: &Path,
@@ -585,20 +583,23 @@ fn read_context_file_from_canonical(
         ));
     }
     if require_migration_source {
-        let is_source_file = config.source_dirs.iter().any(|source| {
-            source
-                .path
-                .strip_prefix(project_root)
-                .ok()
-                .and_then(|source_path| project_directory.canonicalize(source_path).ok())
-                .is_some_and(|source_path| canonical_relative_path.starts_with(source_path))
-        });
-        if !is_source_file
-            || canonical_relative_path
-                .extension()
-                .and_then(|value| value.to_str())
-                != Some("sql")
-        {
+        // `source.path` can keep a non-canonical absolute prefix. macOS
+        // resolves `/var` to `/private/var`, and Windows adds a `\\?\` prefix.
+        // The configured relative source is compared inside this directory.
+        let mut is_source_file = false;
+        for source in &config.source_dirs {
+            let Ok(source_path) = project_directory.canonicalize(&source.relative_path) else {
+                continue;
+            };
+            if canonical_relative_path.starts_with(&source_path) {
+                is_source_file = true;
+                break;
+            }
+        }
+        let extension = canonical_relative_path
+            .extension()
+            .and_then(|value| value.to_str());
+        if !is_source_file || extension != Some("sql") {
             return Err(ai_error(
                 "AI_CONTEXT_PATH_INVALID",
                 "migration context must be a .sql file inside a configured migration source",
@@ -1636,7 +1637,6 @@ mod tests {
             .expect("replace context file with external symlink");
 
         let result = read_context_file_from_canonical(
-            project.path(),
             &project_directory,
             &config,
             &canonical_relative_path,
@@ -1662,7 +1662,6 @@ mod tests {
             .expect("replace context file with internal symlink");
 
         let result = read_context_file_from_canonical(
-            project.path(),
             &project_directory,
             &config,
             &canonical_relative_path,
@@ -1712,7 +1711,6 @@ mod tests {
             .expect("replace nested migration directory with external symlink");
 
         let result = read_context_file_from_canonical(
-            project.path(),
             &project_directory,
             &config,
             &canonical_relative_path,

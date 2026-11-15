@@ -830,10 +830,9 @@ fn logical_path(path: &Path) -> Result<String> {
 mod tests {
     use std::fs;
 
-    use super::{
-        Environment, ProjectDirectory, ensure_project_directory, initialize, load,
-        validate_ai_endpoint,
-    };
+    use super::{Environment, initialize, load, validate_ai_endpoint};
+    #[cfg(unix)]
+    use super::{ProjectDirectory, ensure_project_directory};
     use crate::error::DbmError;
 
     #[test]
