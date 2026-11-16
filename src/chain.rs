@@ -6,7 +6,7 @@
 
 use std::fs;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use cap_std::fs::OpenOptions;
 use rusqlite::{Connection, OpenFlags, TransactionBehavior};
@@ -405,7 +405,7 @@ fn replay_sql(
 ) -> Result<Snapshot> {
     let directory = tempfile::TempDir::new()
         .map_err(|error| DbmError::io("disposable SQLite directory", error))?;
-    let path = directory.path().join("chain.sqlite");
+    let path = disposable_sqlite_path(directory.path())?;
     if config
         .database_path
         .as_ref()
@@ -430,6 +430,25 @@ fn replay_sql(
         apply_up(&mut connection, label, phase, migration)?;
     }
     read_snapshot(&connection, label)
+}
+
+fn disposable_sqlite_path(directory: &Path) -> Result<PathBuf> {
+    // SQLITE_OPEN_NOFOLLOW fails when any path component is a symlink.
+    // macOS keeps the temp directory under /var, which points at /private/var.
+    let resolved = resolved_disposable_directory(directory)?;
+    Ok(resolved.join("chain.sqlite"))
+}
+
+fn resolved_disposable_directory(directory: &Path) -> Result<PathBuf> {
+    #[cfg(unix)]
+    {
+        fs::canonicalize(directory)
+            .map_err(|error| DbmError::io("disposable SQLite directory", error))
+    }
+    #[cfg(not(unix))]
+    {
+        Ok(directory.to_path_buf())
+    }
 }
 
 fn same_file(configured: &Path, disposable: &Path) -> bool {
@@ -810,8 +829,8 @@ mod tests {
     use std::fs;
 
     use super::{
-        PhoneMigration, Snapshot, is_forbidden, parse_published, quote_ident, read_snapshot,
-        reject_phone_sql, replay_sql, shipped_prefix,
+        PhoneMigration, Snapshot, disposable_sqlite_path, is_forbidden, parse_published,
+        quote_ident, read_snapshot, reject_phone_sql, replay_sql, shipped_prefix,
     };
     use crate::error::DbmError;
     use rusqlite::Connection;
@@ -937,6 +956,26 @@ mod tests {
             .any(|table| table.rows.iter().any(|row| row.contains("'kept'")));
         assert!(kept, "pending update did not run on the shipped schema");
         assert_eq!(fs::read(&marker).expect("marker bytes"), b"marker");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn disposable_file_opens_through_a_symlinked_directory() {
+        let real = tempfile::tempdir().expect("real directory");
+        let parent = tempfile::tempdir().expect("link parent");
+        let link = parent.path().join("linked");
+        std::os::unix::fs::symlink(real.path(), &link).expect("symlink");
+        let path = disposable_sqlite_path(&link).expect("resolved path");
+        assert!(
+            !path
+                .components()
+                .any(|component| component.as_os_str() == "linked")
+        );
+        let connection = Connection::open_with_flags(&path, super::disposable_flags())
+            .expect("open through the resolved directory");
+        connection
+            .execute_batch("CREATE TABLE note (id INTEGER PRIMARY KEY);")
+            .expect("sql");
     }
 
     fn phone_migration(version: &str) -> PhoneMigration {
