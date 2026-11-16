@@ -6,9 +6,9 @@
 set -euo pipefail
 
 prefix="$(brew --prefix)"
-pg_bin="$(brew --prefix postgresql@18)/bin"
-mysql_bin="$(brew --prefix mysql@8.4)/bin"
-maria_bin="$(brew --prefix mariadb@11.8)/bin"
+pg_bin=""
+mysql_bin=""
+maria_bin=""
 mount="${RUNNER_TEMP}/dbm-servers"
 image="${RUNNER_TEMP}/dbm-servers.dmg"
 pg_data="${mount}/postgres"
@@ -21,8 +21,24 @@ maria_client="${mount}/mariadb-client.cnf"
 mysql_pid=""
 maria_pid=""
 
+keg_bin() {
+  formula="$1"
+  cellar="$(brew --cellar "${formula}")"
+  found=""
+  for directory in "${cellar}"/*/bin; do
+    if [ -d "${directory}" ]; then
+      found="${directory}"
+    fi
+  done
+  if [ -z "${found}" ]; then
+    echo "no bin directory for ${formula}" >&2
+    exit 1
+  fi
+  printf '%s\n' "${found}"
+}
+
 cleanup() {
-  if [ -x "${pg_bin}/pg_ctl" ] && [ -d "${pg_data}" ]; then
+  if [ -n "${pg_bin}" ] && [ -x "${pg_bin}/pg_ctl" ] && [ -d "${pg_data}" ]; then
     "${pg_bin}/pg_ctl" -D "${pg_data}" -m fast stop >/dev/null 2>&1 || true
   fi
   if [ -n "${mysql_pid}" ]; then
@@ -43,9 +59,18 @@ export HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
 
 brew install postgresql@18
 brew install mysql@8.4
+brew unlink mysql@8.4 || true
 rm -rf "${prefix}/var/mysql"
 brew install mariadb@11.8
+brew unlink mariadb@11.8 || true
 rm -rf "${prefix}/var/mysql"
+pg_bin="$(keg_bin postgresql@18)" || exit 1
+mysql_bin="$(keg_bin mysql@8.4)" || exit 1
+maria_bin="$(keg_bin mariadb@11.8)" || exit 1
+if [ ! -x "${pg_bin}/pg_ctl" ] || [ ! -x "${mysql_bin}/mysqld" ] || [ ! -x "${maria_bin}/mariadbd" ]; then
+  echo "a server binary is missing from its keg" >&2
+  exit 1
+fi
 
 hdiutil create -size 2g -fs 'Case-sensitive APFS' -volname dbm-servers "${image}"
 mkdir -p "${mount}"
