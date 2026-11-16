@@ -1452,70 +1452,46 @@ fn run_mysql_cli_contention_journey(environment_variable: &str, expected_vendor:
             .path()
             .join(format!("migrations/versioned/{version}_same_namespace.sql")),
         format!(
-            "-- dbm:dialect mysql\n-- dbm:transaction never\n-- dbm:up\nSELECT SLEEP(5);\nCREATE TABLE {probe_table} (id BIGINT PRIMARY KEY);\n-- dbm:down\nDROP TABLE {probe_table};\n"
+            "-- dbm:dialect mysql\n-- dbm:transaction never\n-- dbm:up\nCREATE TABLE {probe_table} (id BIGINT PRIMARY KEY);\n-- dbm:down\nDROP TABLE {probe_table};\n"
         ),
     )
     .expect("write same-namespace MySQL/MariaDB contention migration");
 
+    // The proxy holds the user statement before the server executes it. The
+    // named lock is acquired earlier on that same session. Polling
+    // information_schema.processlist is not used: the observer query contains
+    // the marker it searches for, so it can count itself.
+    let proxy = start_mysql_query_hold_proxy(&target_url, &probe_table);
     let mut first = Command::new(env!("CARGO_BIN_EXE_dbm"))
         .current_dir(directory.path())
         .args(["--format", "json", "up"])
-        .env(environment_variable, &target_url)
+        .env(environment_variable, &proxy.url)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("start first MySQL/MariaDB migration CLI");
-    let active_deadline = Instant::now() + Duration::from_secs(15);
-    let mut first_is_sleeping = false;
-    while Instant::now() < active_deadline {
-        let journal_table_count = mysql_scalar(
-            &base_url,
-            &database,
-            "SELECT COUNT(*) FROM information_schema.tables \
-             WHERE table_schema = DATABASE() \
-               AND table_name IN ('schema_migration_runs', 'schema_migration_steps')",
-        );
-        if journal_table_count == Ok(2) {
-            let intent_count = mysql_scalar(
-                &base_url,
-                &database,
-                &format!(
-                    "SELECT COUNT(*) FROM schema_migration_steps AS step \
-                     INNER JOIN schema_migration_runs AS run USING (run_id) \
-                     WHERE run.namespace = '{namespace}' \
-                       AND run.migration_version = '{version}' \
-                       AND run.state = 'started' AND step.state = 'intent_recorded'"
-                ),
-            )
-            .unwrap_or(0);
-            let sleeping_session = mysql_scalar(
-                &base_url,
-                &database,
-                "SELECT COUNT(*) FROM information_schema.processlist \
-                 WHERE DB = DATABASE() AND INFO LIKE '%SELECT SLEEP(5)%'",
-            )
-            .unwrap_or(0);
-            if intent_count == 1 && sleeping_session == 1 {
-                first_is_sleeping = true;
-                break;
-            }
-        }
-        if !matches!(first.try_wait(), Ok(None)) {
-            break;
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-
-    if !first_is_sleeping {
+    let notification = proxy.notification.recv_timeout(Duration::from_secs(15));
+    let statement_held = matches!(&notification, Ok(Ok(())));
+    if !statement_held {
         let _ = first.kill();
         let output = first
             .wait_with_output()
             .expect("reap first MySQL CLI after failed contention setup");
+        let _ = proxy.control.send(MysqlProxyControl::Stop);
+        let proxy_result = proxy
+            .thread
+            .join()
+            .expect("MySQL contention proxy thread did not panic");
         database_cleanup
             .clean()
             .expect("remove isolated database after failed contention setup");
+        let notification_detail = match notification {
+            Ok(Ok(())) => "held target SQL".to_owned(),
+            Ok(Err(error)) => error,
+            Err(error) => format!("no target statement notification: {error}"),
+        };
         panic!(
-            "first CLI did not reach its sleeping statement; stdout={}, stderr={}",
+            "first CLI did not reach its held statement ({notification_detail}); stdout={}, stderr={}, proxy={proxy_result:?}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
@@ -1549,6 +1525,10 @@ fn run_mysql_cli_contention_journey(environment_variable: &str, expected_vendor:
         .wait_with_output()
         .expect("collect competing MySQL/MariaDB CLI output");
 
+    proxy
+        .control
+        .send(MysqlProxyControl::Resume)
+        .expect("release the held MySQL/MariaDB statement");
     let first_deadline = Instant::now() + Duration::from_secs(12);
     let mut first_completed = false;
     while Instant::now() < first_deadline {
@@ -1564,10 +1544,15 @@ fn run_mysql_cli_contention_journey(environment_variable: &str, expected_vendor:
     }
     if !first_completed {
         let _ = first.kill();
+        let _ = proxy.control.send(MysqlProxyControl::Stop);
     }
     let first_output = first
         .wait_with_output()
         .expect("collect first MySQL/MariaDB CLI output");
+    let proxy_result = proxy
+        .thread
+        .join()
+        .expect("MySQL contention proxy thread did not panic");
 
     let run_count = mysql_scalar(
         &base_url,
@@ -1601,16 +1586,28 @@ fn run_mysql_cli_contention_journey(environment_variable: &str, expected_vendor:
 
     assert!(
         competing_completed,
-        "competing CLI did not honor the zero-second lock timeout"
+        "competing CLI did not honor the zero-second lock timeout; stdout={}, stderr={}",
+        String::from_utf8_lossy(&competing_output.stdout),
+        String::from_utf8_lossy(&competing_output.stderr)
     );
-    assert_eq!(competing_output.status.code(), Some(5));
+    assert_eq!(
+        competing_output.status.code(),
+        Some(5),
+        "competing CLI stdout={}, stderr={}",
+        String::from_utf8_lossy(&competing_output.stdout),
+        String::from_utf8_lossy(&competing_output.stderr)
+    );
     assert_eq!(
         json(&competing_output)["errors"][0]["code"],
         "LOCK_UNAVAILABLE"
     );
     assert!(
+        proxy_result.is_ok(),
+        "MySQL statement proxy failed: {proxy_result:?}"
+    );
+    assert!(
         first_completed,
-        "first CLI did not finish after its sleeping statement"
+        "first CLI did not finish after its held statement"
     );
     assert!(
         first_output.status.success(),
