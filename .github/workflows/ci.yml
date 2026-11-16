@@ -84,6 +84,44 @@ jobs:
           cargo run --example sqlite_embedded_migration --locked
           cargo run --example sqlite_schema_dsl --locked
 
+  # PostgreSQL, MySQL, and MariaDB fault matrix on macOS. Service containers
+  # are Linux-only, so the script installs Homebrew servers on 127.0.0.1.
+  # Windows stays outside this job. PgBouncer and the TLS tests stay skipped.
+  server-fault-macos:
+    name: Server fault matrix (macos-latest)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Revalidated against the canonical upstream release on 2026-11-16:
+      # https://github.com/actions/checkout/releases/tag/v7.0.1
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned Rust toolchain
+        run: |
+          if [ -d "$HOME/.cargo/bin" ]; then
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup toolchain install 1.99.1 --profile minimal
+
+      - name: Compile the suite before starting databases
+        run: cargo test --workspace --all-features --locked --no-run
+
+      - name: Record runner
+        run: |
+          printf 'runner_os=%s\n' "${RUNNER_OS:-unknown}"
+          printf 'runner_arch=%s\n' "${RUNNER_ARCH:-unknown}"
+          printf 'runner_image=%s %s\n' "${ImageOS:-unknown}" "${ImageVersion:-unknown}"
+          sw_vers
+          uname -srm
+
+      - name: Run the ignored server matrix
+        run: bash scripts/ci-macos-server-matrix.sh
+
   supply-chain:
     name: Audit dependencies and generate SBOM
     runs-on: ubuntu-latest
