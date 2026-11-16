@@ -3298,6 +3298,32 @@ fn run_mysql_acknowledgement_boundary_journey(
     cleanup.expect("drop isolated MySQL/MariaDB acknowledgement database");
 }
 
+#[test]
+fn postgres_database_url_replaces_only_the_database_name() {
+    assert_eq!(
+        postgres_database_url(
+            "postgres://dbm@127.0.0.1:5432/dbm?sslmode=disable",
+            "dbm_private"
+        ),
+        "postgres://dbm@127.0.0.1:5432/dbm_private?sslmode=disable"
+    );
+}
+
+fn postgres_database_url(database_url: &str, database_name: &str) -> String {
+    let (without_query, query) = match database_url.split_once('?') {
+        Some((path, query)) => (path, Some(query)),
+        None => (database_url, None),
+    };
+    let (prefix, current_name) = without_query
+        .rsplit_once('/')
+        .expect("PostgreSQL URL includes a database name");
+    assert!(!current_name.is_empty() && !prefix.is_empty());
+    match query {
+        Some(query) => format!("{prefix}/{database_name}?{query}"),
+        None => format!("{prefix}/{database_name}"),
+    }
+}
+
 fn postgres_batch_execute(connection_url: &str, sql: &str) -> Result<(), String> {
     let runtime = tokio::runtime::Runtime::new().map_err(|_| "create Tokio runtime")?;
     runtime.block_on(async {
@@ -5900,14 +5926,18 @@ fn cli_postgres_metadata_bootstrap_failure_rolls_back_all_reserved_tables() {
     assert!(parsed.get_hostaddrs().iter().all(IpAddr::is_loopback));
     assert!(!database_url.contains("options="));
 
+    let private_name = format!("dbm_{}", uuid::Uuid::new_v4().simple());
+    postgres_batch_execute(&database_url, &format!("CREATE DATABASE {private_name}"))
+        .expect("create a private PostgreSQL database for the bootstrap fault");
+    let private_url = postgres_database_url(&database_url, &private_name);
     let schema = format!("dbm_bootstrap_failure_{}", uuid::Uuid::new_v4().simple());
-    let schema_url = format!("{database_url}&options=-c%20search_path%3D{schema}%2Cpublic");
+    let schema_url = format!("{private_url}&options=-c%20search_path%3D{schema}%2Cpublic");
     let mut schema_cleanup = PostgresSchemaCleanup {
-        connection_url: database_url.clone(),
+        connection_url: private_url.clone(),
         schema: schema.clone(),
         cleaned: false,
     };
-    postgres_batch_execute(&database_url, &format!("CREATE SCHEMA {schema}"))
+    postgres_batch_execute(&private_url, &format!("CREATE SCHEMA {schema}"))
         .expect("create isolated metadata-bootstrap schema");
     let function = format!(
         "reject_metadata_bootstrap_{}",
@@ -5966,6 +5996,11 @@ fn cli_postgres_metadata_bootstrap_failure_rolls_back_all_reserved_tables() {
     schema_cleanup
         .clean()
         .expect("drop isolated metadata-bootstrap schema");
+    postgres_batch_execute(
+        &database_url,
+        &format!("DROP DATABASE {private_name} WITH (FORCE)"),
+    )
+    .expect("drop the private PostgreSQL database");
 }
 
 #[test]

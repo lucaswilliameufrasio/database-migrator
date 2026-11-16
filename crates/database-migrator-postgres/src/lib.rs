@@ -3960,7 +3960,25 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires DBM_TEST_DATABASE_URL for a disposable loopback PostgreSQL instance"]
     async fn local_postgres_v4_upgrade_failure_rolls_back_prior_ddl() {
-        let (_directory, config) = local_postgres_config(true, None);
+        let admin_url = std::env::var("DBM_TEST_DATABASE_URL")
+            .expect("DBM_TEST_DATABASE_URL must identify a disposable loopback target");
+        let private_name = format!("dbm_{}", uuid::Uuid::new_v4().simple());
+        let (admin, admin_connection) = tokio_postgres::connect(&admin_url, tokio_postgres::NoTls)
+            .await
+            .expect("connect to create a private PostgreSQL database");
+        let admin_task = tokio::spawn(admin_connection);
+        admin
+            .batch_execute(&format!("CREATE DATABASE {private_name}"))
+            .await
+            .expect("create a private PostgreSQL database for the upgrade fault");
+        drop(admin);
+        admin_task.abort();
+        let _ = admin_task.await;
+        let private_url = postgres_database_url(&admin_url, &private_name);
+        let variable_name = format!("DBM_TEST_DATABASE_URL_{private_name}");
+        install_test_connection_url(&variable_name, &private_url);
+        let (_directory, mut config) = local_postgres_config(true, None);
+        config.config.target.url_env = Some(variable_name.clone());
         let adapter = PostgresAdapter;
         let schema = create_isolated_schema(&adapter, &config).await;
         let mut session =
@@ -4055,10 +4073,8 @@ mod tests {
         assert_eq!(before.runs.len(), 1);
         assert_eq!(before.steps.len(), 1);
 
-        let database_url = std::env::var("DBM_TEST_DATABASE_URL")
-            .expect("DBM_TEST_DATABASE_URL remains configured for the test");
         let (observer, observer_connection) =
-            tokio_postgres::connect(&database_url, tokio_postgres::NoTls)
+            tokio_postgres::connect(&private_url, tokio_postgres::NoTls)
                 .await
                 .expect("connect to install PostgreSQL metadata-upgrade fault");
         let observer_task = tokio::spawn(observer_connection);
@@ -4148,7 +4164,33 @@ mod tests {
             .close()
             .await
             .expect("close PostgreSQL metadata-upgrade test session");
-        drop_isolated_schema(&adapter, &config, &schema).await;
+        remove_test_connection_url(&variable_name);
+        let (admin, admin_connection) = tokio_postgres::connect(&admin_url, tokio_postgres::NoTls)
+            .await
+            .expect("connect to drop the private PostgreSQL database");
+        let admin_task = tokio::spawn(admin_connection);
+        admin
+            .batch_execute(&format!("DROP DATABASE {private_name} WITH (FORCE)"))
+            .await
+            .expect("drop the private PostgreSQL database");
+        drop(admin);
+        admin_task.abort();
+        let _ = admin_task.await;
+    }
+
+    fn postgres_database_url(database_url: &str, database_name: &str) -> String {
+        let (without_query, query) = match database_url.split_once('?') {
+            Some((path, query)) => (path, Some(query)),
+            None => (database_url, None),
+        };
+        let (prefix, current_name) = without_query
+            .rsplit_once('/')
+            .expect("PostgreSQL URL includes a database name");
+        assert!(!current_name.is_empty() && !prefix.is_empty());
+        match query {
+            Some(query) => format!("{prefix}/{database_name}?{query}"),
+            None => format!("{prefix}/{database_name}"),
+        }
     }
 
     #[tokio::test]

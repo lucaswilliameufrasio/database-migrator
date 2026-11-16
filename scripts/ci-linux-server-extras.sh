@@ -74,8 +74,8 @@ wait_exec dbm-pg pg_isready -U dbm
 wait_exec dbm-mysql mysqladmin ping -uroot -pdbm --silent
 wait_exec dbm-maria mariadb-admin ping -uroot -pdbm --silent
 
-docker exec dbm-mysql mysql -uroot -pdbm -e "ALTER DATABASE dbm CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;"
-docker exec dbm-maria mariadb -uroot -pdbm -e "ALTER DATABASE dbm CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;"
+docker exec dbm-mysql mysql -uroot -pdbm -e "ALTER DATABASE dbm CHARACTER SET utf8mb4 COLLATE utf8mb4_bin; GRANT ALL PRIVILEGES ON *.* TO 'dbm'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"
+docker exec dbm-maria mariadb -uroot -pdbm -e "ALTER DATABASE dbm CHARACTER SET utf8mb4 COLLATE utf8mb4_bin; GRANT ALL PRIVILEGES ON *.* TO 'dbm'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"
 
 export DBM_TEST_DATABASE_URL='postgres://dbm@127.0.0.1:5432/dbm?sslmode=disable'
 export DBM_TEST_MYSQL_URL='mysql://dbm:dbm@127.0.0.1:3306/dbm'

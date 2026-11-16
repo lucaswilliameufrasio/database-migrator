@@ -132,18 +132,22 @@ $mysqlProc = Start-Process -FilePath $mysqld -ArgumentList @(
 ) -PassThru -WindowStyle Hidden
 
 $mariaLog = Join-Path $root 'mariadb.err'
+# mysql_install_db creates root@localhost and root@<hostname>. --skip-name-resolve
+# ignores the hostname account, and --init-file did not leave a usable
+# root@127.0.0.1. --allow-remote-root-access copies root to root@'%' and
+# --password stores mysql_native_password before the server loads the grants.
 $mariaInit = Start-Process -FilePath $mariaInstall -ArgumentList @(
-    '--datadir', $mariaData
+    '--datadir', $mariaData,
+    '--password=dbm',
+    '--allow-remote-root-access'
 ) -Wait -PassThru -NoNewWindow
 if ($mariaInit.ExitCode -ne 0) {
     throw 'mariadb install db failed'
 }
-$mariaInitSql = Write-RootTcpInit (Join-Path $root 'mariadb-init.sql')
 $mariaProc = Start-Process -FilePath $mariadbd -ArgumentList @(
     '--no-defaults',
     "--datadir=$mariaData",
     "--tmpdir=$mariaTmp",
-    "--init-file=$mariaInitSql",
     '--bind-address=127.0.0.1',
     '--port=3307',
     '--skip-name-resolve',
