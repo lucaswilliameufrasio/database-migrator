@@ -1,11 +1,11 @@
 # Progresso pós-1.0
 
-> **Estado:** C7 feito em 2026-11-15. Próximo passo: B3. B3 continua pendente.
+> **Estado:** B3 feito em 2026-11-16. A tabela pós-1.0 não tem próximo item pendente.
 > **Base:** tag `v1.0.0`, commit `9972f56adb1f01646096cb017c2c0657e8726e2c`.
 > **Decisão:** [ADR-026](adr/ADR-026-workspace-e-produto-cliente.md).
 > **Como atualizar:** no commit que entrega um item, mude o estado dessa linha e a data desta revisão. Não reescreva o histórico da V1 no plano mestre.
 
-**Revisão:** 2026-11-15. Próximo passo: B3. B3 continua pendente.
+**Revisão:** 2026-11-16. B3 feito. A tabela pós-1.0 não tem próximo item pendente.
 
 O release 1.0.0 continua valendo como foi evidenciado: Linux x86_64, metadata 5, API pública congelada, crate não publicado. Este arquivo acompanha o que vem depois. G11 e G12 do plano mestre são o critério histórico da V1.
 
@@ -59,11 +59,13 @@ A4, em 2026-11-14, documentou esse embed em `docs/embed.md` e apontou o texto no
 | --- | --- | --- |
 | B1 | Jobs em runner macOS e Windows do GitHub para formatar, lint, testar, buildar e rodar os exemplos SQLite. Sem serviço de banco nesse job. | feito |
 | B2 | Atualizar a matriz de suporte só com o que o job verde cobriu. O texto da 1.0 sobre Linux x86_64 permanece como evidência daquele release. | feito |
-| B3 | Matriz de falha com PostgreSQL, MySQL e MariaDB em macOS ou Windows, somente se formos declarar suporte de servidor nesses sistemas. | pendente |
+| B3 | Matriz de falha com PostgreSQL, MySQL e MariaDB em macOS ou Windows, somente se formos declarar suporte de servidor nesses sistemas. | feito |
 
 B1, em 2026-11-14, adicionou o job `quality-platforms` em `.github/workflows/ci.yml`. A matriz usa `macos-latest` e `windows-latest`, com `fail-fast: false`. Cada runner formata, roda Clippy com `-D warnings`, `cargo test --workspace --all-features --locked`, o build e os dois exemplos SQLite. Não há `services` nem URL de banco, então os testes de servidor continuam ignorados. Os jobs Linux de qualidade, supply-chain e performance permanecem. O checkout continua `actions/checkout` v7.0.1 (`3d3c42e5aac5ba805825da76410c181273ba90b1`), conferido na release upstream em 2026-11-14. A matriz de suporte não mudou. O CI remoto não rodou.
 
 B2, em 2026-11-15, registrou o job verde. O push `43743366222` no commit `96ff75eff5e698719eb3abefb0158ba2287cfdd9` passou em `macos-latest` (imagem `macos-26-arm64`) e `windows-latest` (imagem `windows-2025`), além dos jobs Linux. macOS: 162 passed e 49 ignored. Windows: 152 passed e 49 ignored; dez testes só de Unix não entram na compilação. Não havia serviço de banco. PostgreSQL, MySQL e MariaDB continuam sem evidência nesses sistemas. O texto da 1.0 sobre Linux x86_64 permanece. B3 continua pendente e só entra se formos declarar suporte de servidor em macOS ou Windows.
+
+B3, em 2026-11-16, no commit `d87979a6ce00c3e0f50f6e71afd0530fbaab9e8f`. O job `server-fault-macos` do push `43800479891` passou em `macos-latest` (imagem `macos26 20261102.0473.1`, macOS 26.7.2, Darwin 25.6.0 arm64). Homebrew subiu PostgreSQL 18.6, MySQL 8.4.13 e MariaDB 11.8.9 em `127.0.0.1`, com o diretório de dados num volume APFS que distingue maiúsculas. O comando foi `cargo test --workspace --all-features --locked -- --ignored --skip pgbouncer --skip _tls_ --test-threads=1`. Passaram 45 testes e falhou 0: 16 de biblioteca/engine, 23 de CLI, 3 de DSL e 3 de importação legada. PgBouncer, os três testes de TLS, a suíte paralela e as linhas de patch anteriores não rodaram. Servidor no Windows continua sem evidência. A evidência Linux x86_64 da 1.0 permanece. A versão continua 1.0.0. Publicação no crates.io, no pub.dev, asset de release e migration de produção continuam fora. A tabela pós-1.0 não tem próximo item pendente.
 
 ### C. Produto de cliente, repositório novo
 

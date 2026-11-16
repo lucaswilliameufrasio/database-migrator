@@ -4,7 +4,9 @@ Release 1.0.0 declares Linux x86_64 and the server lines below. The 2026-11-13
 revalidation of the current commit is recorded after the historical runs. Those
 older paragraphs stay as written. Server versions not listed here stay outside
 that release. The later SQLite CI on macOS and Windows is in the operating-system
-row and does not replace the 1.0.0 Linux evidence.
+row and does not replace the 1.0.0 Linux evidence. The 2026-11-16 macOS
+server fault matrix is in that same row. It does not add Windows server
+support and does not replace the Linux 1.0.0 evidence.
 
 ## Database servers
 
@@ -36,7 +38,7 @@ matrix or security review.
 | Area | Declared/current evidence | Qualification |
 |---|---|---|
 | Rust | `rust-version = 1.89`; development and CI toolchain 1.99.1; `cargo +1.89.0 test --workspace --all-features --locked` passed on 2026-11-08 | Full workspace tests are verified on the declared MSRV; the complete format/Clippy/build/examples/supply-chain gate is recorded on 1.99.1, not 1.89. |
-| Operating system | Release 1.0.0: GitHub CI `ubuntu-latest`, local work Linux x86_64. On 2026-11-15, commit `96ff75eff5e698719eb3abefb0158ba2287cfdd9`, push run `43743366222`, job `quality-platforms` passed on `macos-latest` (image `macos-26-arm64`) and `windows-latest` (image `windows-2025`). Each runner ran `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, `cargo test --workspace --all-features --locked`, `cargo build --workspace --all-features --locked`, and examples `sqlite_embedded_migration` and `sqlite_schema_dsl`. | No database service and no server URL. macOS reported 162 passed and 49 ignored. Windows reported 152 passed and 49 ignored; ten Unix-only tests are not compiled on Windows. PostgreSQL, MySQL, and MariaDB stay unverified on those systems. This row does not replace the 1.0.0 Linux x86_64 release evidence. |
+| Operating system | Release 1.0.0: GitHub CI `ubuntu-latest`, local work Linux x86_64. On 2026-11-15, commit `96ff75eff5e698719eb3abefb0158ba2287cfdd9`, push run `43743366222`, job `quality-platforms` passed on `macos-latest` (image `macos-26-arm64`) and `windows-latest` (image `windows-2025`). Each runner ran `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, `cargo test --workspace --all-features --locked`, `cargo build --workspace --all-features --locked`, and examples `sqlite_embedded_migration` and `sqlite_schema_dsl`. On 2026-11-16, commit `d87979a6ce00c3e0f50f6e71afd0530fbaab9e8f`, push run `43800479891`, job `server-fault-macos` passed on `macos-latest` (image `macos26 20261102.0473.1`, macOS 26.7.2, Darwin 25.6.0 arm64). | The 2026-11-15 platform job had no database service and no server URL. macOS reported 162 passed and 49 ignored. Windows reported 152 passed and 49 ignored; ten Unix-only tests are not compiled on Windows. The 2026-11-16 macOS job ran `cargo test --workspace --all-features --locked -- --ignored --skip pgbouncer --skip _tls_ --test-threads=1` against Homebrew PostgreSQL 18.6, MySQL 8.4.13, and MariaDB 11.8.9 on `127.0.0.1`. It passed 45 tests and failed 0: 16 library/engine, 23 CLI, 3 DSL, and 3 legacy-import. PgBouncer, the three TLS tests, the parallel suite, and older patch lines were not run. Windows servers remain unverified. This row does not replace the 1.0.0 Linux x86_64 release evidence. |
 | Optional AI | `ai` Cargo feature; optional `cap-std`/`cap-fs-ext` 4.0.3; fake HTTP/provider tests; Unix regression tests reject final and intermediate symlinks swapped after path canonicalization | The 2026-11-15 platform job ran the all-features suite, including the AI tests, on macOS and Windows. The Unix symlink regressions run on macOS and are not compiled on Windows. No real AI provider was called. Provider behavior, availability, and output quality are not certified. Under the aggressive post-fix path-race reproduction all 160 previews failed closed, so it established no successful-preview rate under contention. |
 | Fuzzing | Scanner/parser targets and seed corpus are under `fuzz/`; both targets completed bounded runs on 2026-11-07 with retained generated corpora | Nightly Rust and `cargo-fuzz` were used in a rootless, network-disabled sandbox. `sql_scanner`: 2,309,020 executions; `migration_parser`: 2,404,475; 301 seconds each with configured 300-second limit. No crash artifacts were reported. This is bounded evidence, not proof of correctness; details and retained-corpus manifest are in `supply-chain.md`. |
 
@@ -54,3 +56,13 @@ PgBouncer and three TLS tests were excluded. Both fuzz targets then completed
 Details are in `security-revalidation-2026-11-13.md`. Older patch lines were
 not repeated on this commit. MariaDB 12.3 remains unexercised. The
 default-parallel suite remains unverified.
+
+**macOS server fault matrix — 2026-11-16:** on
+`d87979a6ce00c3e0f50f6e71afd0530fbaab9e8f`, push run `43800479891`, the same
+45-test ignored selection passed once, serially, on `macos-latest` arm64
+against Homebrew PostgreSQL 18.6, MySQL 8.4.13, and MariaDB 11.8.9. The
+result was again 16 library/engine, 23 CLI, 3 DSL, and 3 legacy-import
+tests, with zero failures. PgBouncer, three TLS tests, the parallel suite,
+older patch lines, and MariaDB 12.3 were not run. Windows servers were not
+part of this job. The 2026-11-13 Linux x86_64 revalidation above is
+unchanged.
