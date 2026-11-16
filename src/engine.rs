@@ -6064,6 +6064,37 @@ mod tests {
             .close()
             .await
             .expect("close MySQL-family reconciliation verification session");
+
+        // The shared URL database is reused by later ignored tests. This test
+        // initializes metadata there and must remove only those tables.
+        let cleanup_url = std::env::var(environment_variable).unwrap_or_else(|_| {
+            panic!("{environment_variable} must still identify the test target")
+        });
+        let mut cleanup =
+            mysql_async::Conn::new(mysql_async::Opts::from_url(&cleanup_url).unwrap_or_else(
+                |_| panic!("{environment_variable} must still be a valid MySQL URL"),
+            ))
+            .await
+            .expect("reconnect to remove metadata from the shared test database");
+        for statement in [
+            "DROP TABLE IF EXISTS schema_migration_steps",
+            "DROP TABLE IF EXISTS schema_migration_locks",
+            "DROP TABLE IF EXISTS schema_migrations",
+            "DROP TABLE IF EXISTS schema_migration_adoptions",
+            "DROP TABLE IF EXISTS schema_migration_import_events",
+            "DROP TABLE IF EXISTS schema_migration_imports",
+            "DROP TABLE IF EXISTS schema_migration_runs",
+            "DROP TABLE IF EXISTS schema_migration_meta",
+        ] {
+            cleanup
+                .query_drop(statement)
+                .await
+                .expect("remove DBM metadata from the shared test database");
+        }
+        cleanup
+            .disconnect()
+            .await
+            .expect("close shared test database cleanup connection");
     }
 
     #[tokio::test]
