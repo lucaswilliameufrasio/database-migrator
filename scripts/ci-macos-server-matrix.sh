@@ -153,7 +153,13 @@ EOF
   --log-error="${mount}/mysql.err" &
 mysql_pid=$!
 
-"${maria_bin}/mariadb-install-db" --no-defaults --datadir="${maria_data}"
+# The default is unix_socket. root@localhost then accepts only the OS root
+# user, and the GitHub runner is not root. An empty password lets the
+# disposable account be created over the local socket.
+"${maria_bin}/mariadb-install-db" \
+  --no-defaults \
+  --datadir="${maria_data}" \
+  --auth-root-authentication-method=normal
 "${maria_bin}/mariadbd" \
   --no-defaults \
   --datadir="${maria_data}" \
@@ -168,37 +174,49 @@ maria_pid=$!
 
 wait_tcp() {
   port="$1"
+  error_log="$2"
   attempt=1
   while [ "${attempt}" -le 90 ]; do
-    if python3 -c 'import socket,sys; socket.create_connection(("127.0.0.1", int(sys.argv[1])), 2).close()' "${port}"; then
+    if python3 -c 'import socket,sys; socket.create_connection(("127.0.0.1", int(sys.argv[1])), 2).close()' "${port}" >/dev/null 2>&1; then
       return 0
     fi
     attempt=$((attempt + 1))
     sleep 1
   done
   echo "timed out waiting for 127.0.0.1:${port}" >&2
+  if [ -f "${error_log}" ]; then
+    tail -n 50 "${error_log}" >&2
+  fi
   return 1
 }
 
 wait_sql() {
   client="$1"
   socket="$2"
+  error_log="$3"
+  probe_log="${mount}/sql-probe.err"
   attempt=1
   while [ "${attempt}" -le 30 ]; do
-    if "${client}" --no-defaults --socket="${socket}" -u root -e 'SELECT 1' >/dev/null 2>&1; then
+    if "${client}" --no-defaults --socket="${socket}" -u root -e 'SELECT 1' >/dev/null 2>"${probe_log}"; then
       return 0
     fi
     attempt=$((attempt + 1))
     sleep 1
   done
   echo "root SQL did not become ready on ${socket}" >&2
+  if [ -s "${probe_log}" ]; then
+    cat "${probe_log}" >&2
+  fi
+  if [ -f "${error_log}" ]; then
+    tail -n 50 "${error_log}" >&2
+  fi
   return 1
 }
 
-wait_tcp 3306
-wait_tcp 3307
-wait_sql "${mysql_bin}/mysql" "${mysql_socket}"
-wait_sql "${maria_bin}/mariadb" "${maria_socket}"
+wait_tcp 3306 "${mount}/mysql.err"
+wait_tcp 3307 "${mount}/mariadb.err"
+wait_sql "${mysql_bin}/mysql" "${mysql_socket}" "${mount}/mysql.err"
+wait_sql "${maria_bin}/mariadb" "${maria_socket}" "${mount}/mariadb.err"
 
 "${mysql_bin}/mysql" --no-defaults --socket="${mysql_socket}" -u root <<'SQL'
 CREATE DATABASE dbm CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
