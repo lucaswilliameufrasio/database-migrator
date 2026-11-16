@@ -238,8 +238,8 @@ if [ "${probe_count}" != "2" ]; then
   exit 1
 fi
 
-mkdir -p "${pg_data}" "${mysql_data}" "${maria_data}"
-chmod 700 "${pg_data}" "${mysql_data}" "${maria_data}"
+mkdir -p "${pg_data}" "${mysql_data}/tmp" "${maria_data}/tmp"
+chmod 700 "${pg_data}" "${mysql_data}" "${mysql_data}/tmp" "${maria_data}" "${maria_data}/tmp"
 
 "${pg_initdb}" --locale=en_US.UTF-8 --encoding=UTF-8 --username=dbm \
   --auth=trust --auth-host=trust "${pg_data}"
@@ -271,11 +271,13 @@ EOF
   --no-defaults \
   --initialize-insecure \
   --datadir="${mysql_data}" \
+  --tmpdir="${mysql_data}/tmp" \
   --lower_case_table_names=0 \
   --log-error="${mount}/mysql-init.err"
 "${mysql_server}" \
   --no-defaults \
   --datadir="${mysql_data}" \
+  --tmpdir="${mysql_data}/tmp" \
   --bind-address=127.0.0.1 \
   --port=3306 \
   --socket="${mysql_socket}" \
@@ -289,13 +291,27 @@ mysql_pid=$!
 # The default is unix_socket. root@localhost then accepts only the OS root
 # user, and the GitHub runner is not root. An empty password lets the
 # disposable account be created over the local socket.
-"${maria_install}" \
-  --no-defaults \
-  --datadir="${maria_data}" \
-  --auth-root-authentication-method=normal
+# The runner can delete a file in its default temp directory while bootstrap
+# still needs it, and MariaDB then aborts on mysql.tmp_user_sys. The temp
+# directory stays inside this datadir. One fresh retry covers a partial init.
+install_maria() {
+  "${maria_install}" \
+    --no-defaults \
+    --datadir="${maria_data}" \
+    --tmpdir="${maria_data}/tmp" \
+    --auth-root-authentication-method=normal
+}
+if ! install_maria; then
+  echo "mariadb-install-db failed; retrying once with a fresh datadir" >&2
+  rm -rf "${maria_data}"
+  mkdir -p "${maria_data}/tmp"
+  chmod 700 "${maria_data}" "${maria_data}/tmp"
+  install_maria
+fi
 "${maria_server}" \
   --no-defaults \
   --datadir="${maria_data}" \
+  --tmpdir="${maria_data}/tmp" \
   --bind-address=127.0.0.1 \
   --port=3307 \
   --socket="${maria_socket}" \
