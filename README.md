@@ -23,6 +23,16 @@ MariaDB 11.8 is the newest line with that same suite. MariaDB 12.3 has not
 been run. Release 1.0.0 remains Linux x86_64. Current CI also runs the SQLite
 suite on macOS and Windows; the support matrix records the limit.
 
+On 2026-11-16, push run `43843629998` ran that ignored suite on five macOS
+cells, including MySQL 8.0.46 with MariaDB 12.3.3, and again on MySQL 9.7.4
+with MariaDB 13.0.2. The same push ran it on Windows Server 2025 against
+PostgreSQL 18.6, MySQL 8.4.13, and MariaDB 11.8.9. On Linux it ran the
+parallel ignored suite, PgBouncer 1.22.0, and the three TLS tests against
+PostgreSQL 18.7 (Debian 18.7-1.pgdg13+2), MySQL 8.4.13, and MariaDB 11.8.9.
+That Debian 18.7 line does not replace PostgreSQL 18.6 in the table above.
+Release 1.1.0 keeps the 1.0.0 API. It is not on crates.io. The support matrix
+records the limits.
+
 ## Quick start
 
 Requires Rust 1.89 or newer. The repository toolchain is 1.99.1. SQLite is

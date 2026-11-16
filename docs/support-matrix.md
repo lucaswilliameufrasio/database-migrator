@@ -81,3 +81,30 @@ cells used image `macos26 20261102.0473.1`. The PostgreSQL 17 cell used image
 --skip _tls_ --test-threads=1`. MySQL 8.0, MariaDB 12.3, PgBouncer, the three
 TLS tests, the parallel suite, and Windows servers were not run. This job does
 not replace the Linux 1.0.0 evidence and does not add Windows server support.
+
+**Server lines, Windows servers, pool, and TLS — 2026-11-16:** on
+`3c3e18f0e04887561ff6ee907575ac3d8cb9dd49`, push run `43843629998`, five
+`macos-latest` arm64 cells each passed the same 45-test ignored selection
+once, serially. The host was macOS 26.7.2, Darwin 25.6.0, build 25G332, and
+every cell used image `macos26 20261102.0473.1`. Printed versions were
+PostgreSQL 16.15 with MySQL 8.4.13 and MariaDB 10.11.19; PostgreSQL 17.11
+with MySQL 8.4.13 and MariaDB 11.4.13; PostgreSQL 18.6 with MySQL 8.4.13 and
+MariaDB 11.8.9; PostgreSQL 18.6 with MySQL 9.7.4 and MariaDB 13.0.2; and
+PostgreSQL 18.6 with MySQL 8.0.46 and MariaDB 12.3.3. Each cell passed 16
+library/engine, 23 CLI, 3 DSL, and 3 legacy-import tests, with zero
+failures. The command was `cargo test --workspace --all-features --locked --
+--ignored --skip pgbouncer --skip _tls_ --test-threads=1`. The same push ran
+that selection on Windows Server 2025 against PostgreSQL 18.6, MySQL 8.4.13,
+and MariaDB 11.8.9, again 45 passed and 0 failed. On Ubuntu the parallel
+ignored suite, skipping PgBouncer and TLS and without `--test-threads=1`,
+passed the same 45 tests against PostgreSQL 18.7 (Debian 18.7-1.pgdg13+2),
+MySQL 8.4.13, and MariaDB 11.8.9-MariaDB-ubu2404. PgBouncer 1.22.0-1build4
+passed
+`local_pgbouncer_backend_change_is_rejected_after_session_lock_acquisition`.
+The TLS run passed `mysql_tls_validates_the_configured_ca_and_hostname`,
+`mariadb_tls_validates_the_configured_ca_and_hostname`, and
+`local_postgres_tls_connection_validates_a_configured_ca`. Debian PostgreSQL
+18.7 does not replace the Homebrew 18.6 broad-suite line. MySQL 9.7.4 and
+MariaDB 13.0.2 were exercised again as a full ignored cell; the
+recovery-drill wording above stays as written. This job does not replace the
+Linux 1.0.0 evidence.
