@@ -271,6 +271,11 @@ fn start_mysql_query_hold_proxy(connection_url: &str, query_fragment: &str) -> M
                 client
                     .set_nodelay(true)
                     .map_err(|error| format!("configure MySQL proxy client: {error}"))?;
+                // macOS accept keeps the listener nonblocking. Linux returns a
+                // blocking socket. The packet loop reads until the target DDL.
+                client
+                    .set_nonblocking(false)
+                    .map_err(|error| format!("make MySQL proxy client blocking: {error}"))?;
                 let mut server = TcpStream::connect(target_address)
                     .map_err(|error| format!("connect proxy to disposable MySQL: {error}"))?;
                 server
