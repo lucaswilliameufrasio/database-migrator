@@ -70,12 +70,33 @@ wait_exec() {
   return 1
 }
 
-wait_exec dbm-pg pg_isready -U dbm
-wait_exec dbm-mysql mysqladmin ping -uroot -pdbm --silent
-wait_exec dbm-maria mariadb-admin ping -uroot -pdbm --silent
+# A ping succeeds against the image's temporary server. That process then
+# exits, and the next client fails with ERROR 2002. The final server is the
+# one that logs port 3306. The SQL itself has to succeed there: a following
+# statement can still land in the gap after the temporary server dies.
+wait_database_sql() {
+  name="$1"
+  client="$2"
+  sql="$3"
+  attempt=1
+  while [ "${attempt}" -le 90 ]; do
+    if docker logs "${name}" 2>&1 | grep -F 'port: 3306' >/dev/null \
+      && docker exec "${name}" "${client}" -uroot -pdbm -e "${sql}" >/dev/null 2>&1; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    sleep 2
+  done
+  echo "timed out waiting for ${name}" >&2
+  docker logs "${name}" >&2 || true
+  return 1
+}
 
-docker exec dbm-mysql mysql -uroot -pdbm -e "ALTER DATABASE dbm CHARACTER SET utf8mb4 COLLATE utf8mb4_bin; GRANT ALL PRIVILEGES ON *.* TO 'dbm'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"
-docker exec dbm-maria mariadb -uroot -pdbm -e "ALTER DATABASE dbm CHARACTER SET utf8mb4 COLLATE utf8mb4_bin; GRANT ALL PRIVILEGES ON *.* TO 'dbm'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"
+server_grants="ALTER DATABASE dbm CHARACTER SET utf8mb4 COLLATE utf8mb4_bin; GRANT ALL PRIVILEGES ON *.* TO 'dbm'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"
+
+wait_exec dbm-pg pg_isready -U dbm
+wait_database_sql dbm-mysql mysql "${server_grants}"
+wait_database_sql dbm-maria mariadb "${server_grants}"
 
 export DBM_TEST_DATABASE_URL='postgres://dbm@127.0.0.1:5432/dbm?sslmode=disable'
 export DBM_TEST_MYSQL_URL='mysql://dbm:dbm@127.0.0.1:3306/dbm'
@@ -191,8 +212,8 @@ docker run -d --name dbm-maria-tls \
   --ssl-ca=/certs/ca.pem
 
 wait_exec dbm-pg-tls pg_isready -U dbm
-wait_exec dbm-mysql-tls mysqladmin ping -uroot -pdbm --silent
-wait_exec dbm-maria-tls mariadb-admin ping -uroot -pdbm --silent
+wait_database_sql dbm-mysql-tls mysql "SELECT 1"
+wait_database_sql dbm-maria-tls mariadb "SELECT 1"
 
 export DBM_TEST_DATABASE_URL='postgres://dbm@127.0.0.1:5433/dbm?sslmode=require'
 export DBM_TEST_POSTGRES_CA_FILE="${certs}/ca.pem"
