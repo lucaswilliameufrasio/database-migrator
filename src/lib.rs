@@ -7,6 +7,8 @@
 #[cfg(feature = "ai")]
 pub mod ai;
 #[cfg(feature = "cli")]
+mod chain;
+#[cfg(feature = "cli")]
 pub mod cli;
 mod database;
 #[cfg(feature = "dsl")]

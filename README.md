@@ -112,6 +112,8 @@ allow_insecure_transport = true
 |---|---|
 | `plan` | Read-only. Prints `Plan <hash>` and `Target <fingerprint>`. |
 | `plan --down --steps N` | Prints the rollback hash for that step count. |
+| `chain` | Replays each published SQLite schema, then the pending up SQL, on a disposable file. Does not open the configured database. |
+| `chain record <name> --through <version>` | Records that published schema. Refuses to overwrite. |
 | `up` / `down` | Apply or roll back. Development and test need no extra flags. |
 | `status`, `history`, `doctor` | Read-only. |
 | `doctor reconcile` | Records an operator decision. It does not execute SQL. |
@@ -135,6 +137,21 @@ apply/adopt keep their own `--yes` or digest checks and also require
 with one entry per statement: `step_index`, `statement_hash`, `state`
 (`confirmed_applied`, `confirmed_not_applied`, or `indeterminate`), and
 `inspection`. An indeterminate step blocks reconciliation.
+
+## Phone chain
+
+Phone SQL stays in its own SQLite project. Server SQL does not go in that
+directory. `published/<name>.txt`, next to `dbm.toml`, lists the versions that
+already shipped and the `sha256:raw:v1` checksum of each up section. That
+checksum is not the migration file checksum. `dbm chain` replays every
+published file on a new SQLite file and then applies the pending up SQL. It
+does not open the configured database and it does not run down SQL. An empty
+`published/` directory means nothing has shipped; the fresh chain still runs.
+
+```sh
+dbm chain record store-1.0 --through 20261115000000000001
+dbm chain
+```
 
 ## Library, runner, and AI
 

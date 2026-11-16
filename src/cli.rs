@@ -77,6 +77,11 @@ enum Command {
     },
     Status,
     History,
+    /// Replay each published SQLite schema, then the pending up SQL, on a disposable file.
+    Chain {
+        #[command(subcommand)]
+        action: Option<ChainCommand>,
+    },
     Doctor {
         #[command(subcommand)]
         action: Option<DoctorCommand>,
@@ -93,6 +98,17 @@ enum Command {
     Ai {
         #[command(subcommand)]
         action: AiCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ChainCommand {
+    /// Record the up SQL that already shipped. Refuses to overwrite.
+    Record {
+        name: String,
+        /// Last shipped version. The schema is the chain through this version.
+        #[arg(long)]
+        through: String,
     },
 }
 
@@ -277,6 +293,10 @@ impl Cli {
             Command::Down { .. } => "down",
             Command::Status => "status",
             Command::History => "history",
+            Command::Chain { action } => match action {
+                Some(ChainCommand::Record { .. }) => "chain record",
+                None => "chain",
+            },
             Command::Doctor { action } => match action {
                 Some(DoctorCommand::Reconcile { .. }) => "doctor reconcile",
                 None => "doctor",
@@ -596,6 +616,29 @@ impl Cli {
                                 run.direction, run.migration_id, run.state, run.run_id
                             );
                         }
+                    }
+                }
+            }
+            Command::Chain { action } => {
+                let load_path = self.config.clone();
+                let namespace = self.namespace.clone();
+                let request = match action {
+                    None => crate::chain::ChainRequest::Replay,
+                    Some(ChainCommand::Record { name, through }) => {
+                        crate::chain::ChainRequest::Record { name, through }
+                    }
+                };
+                let result = run_blocking(move || {
+                    let loaded = config::load_with_namespace(&load_path, namespace.as_deref())?;
+                    crate::chain::execute(&loaded, request)
+                })
+                .await?;
+                match result {
+                    crate::chain::ChainResult::Replay(report) => {
+                        emit_chain(&report, self.format)?;
+                    }
+                    crate::chain::ChainResult::Record(report) => {
+                        emit_chain_record(&report, self.format)?;
                     }
                 }
             }
@@ -1233,6 +1276,38 @@ fn protocol_output_error(message: &str) -> DbmError {
         driver: "migration runner protocol",
         message: message.to_owned(),
     }
+}
+
+fn emit_chain(report: &crate::chain::ReplayReport, format: OutputFormat) -> Result<()> {
+    if format == OutputFormat::Json {
+        return print_json(report);
+    }
+    println!("Chain ok");
+    println!("fresh applied {}", report.fresh.applied.len());
+    if report.published.is_empty() {
+        println!("published 0");
+        return Ok(());
+    }
+    for published in &report.published {
+        println!(
+            "published {} from {} applied {}",
+            published.name,
+            published.head,
+            published.applied.len()
+        );
+    }
+    Ok(())
+}
+
+fn emit_chain_record(report: &crate::chain::RecordReport, format: OutputFormat) -> Result<()> {
+    if format == OutputFormat::Json {
+        return print_json(report);
+    }
+    println!(
+        "Recorded published schema {} through {}",
+        report.name, report.through
+    );
+    Ok(())
 }
 
 fn print_json<T: Serialize>(value: &T) -> Result<()> {
