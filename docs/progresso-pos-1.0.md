@@ -103,7 +103,7 @@ A suíte de servidores da 1.1.0, em 2026-11-16, fica fora da tabela. O fechament
 
 ## Fora deste acompanhamento
 
-- Publicar no crates.io ou enviar binário para release do GitHub.
+- Publicar no crates.io, ou anexar o binário `dbm` a uma release do GitHub. A tag `v1.1.0` publica só o arquivo-fonte gerado pelo GitHub.
 - Rodar migration de produção.
 - Expo, React Native, Flutter desktop e Flutter web.
 - Sync offline e SQLCipher.
