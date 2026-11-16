@@ -70,8 +70,27 @@ wait_exec() {
   return 1
 }
 
+# mysqladmin ping returns success for the image's temporary server. That
+# process then exits, and the next client fails with ERROR 2002. The final
+# server is the one that logs port 3306.
+wait_mysql_final_server() {
+  name="$1"
+  attempt=1
+  while [ "${attempt}" -le 90 ]; do
+    if docker logs "${name}" 2>&1 | grep -F 'port: 3306' >/dev/null \
+      && docker exec "${name}" mysql -uroot -pdbm -e "SELECT 1" >/dev/null 2>&1; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    sleep 2
+  done
+  echo "timed out waiting for ${name}" >&2
+  docker logs "${name}" >&2 || true
+  return 1
+}
+
 wait_exec dbm-pg pg_isready -U dbm
-wait_exec dbm-mysql mysqladmin ping -uroot -pdbm --silent
+wait_mysql_final_server dbm-mysql
 wait_exec dbm-maria mariadb-admin ping -uroot -pdbm --silent
 
 docker exec dbm-mysql mysql -uroot -pdbm -e "ALTER DATABASE dbm CHARACTER SET utf8mb4 COLLATE utf8mb4_bin; GRANT ALL PRIVILEGES ON *.* TO 'dbm'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"
@@ -191,7 +210,7 @@ docker run -d --name dbm-maria-tls \
   --ssl-ca=/certs/ca.pem
 
 wait_exec dbm-pg-tls pg_isready -U dbm
-wait_exec dbm-mysql-tls mysqladmin ping -uroot -pdbm --silent
+wait_mysql_final_server dbm-mysql-tls
 wait_exec dbm-maria-tls mariadb-admin ping -uroot -pdbm --silent
 
 export DBM_TEST_DATABASE_URL='postgres://dbm@127.0.0.1:5433/dbm?sslmode=require'
