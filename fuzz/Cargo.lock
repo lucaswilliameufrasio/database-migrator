@@ -447,6 +447,7 @@ version = "1.0.0"
 dependencies = [
  "database-migrator-core",
  "mysql_async",
+ "rustls",
  "sha2 0.11.1",
  "tokio",
  "uuid",
