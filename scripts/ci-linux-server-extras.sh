@@ -85,7 +85,7 @@ printf 'mysql_version=%s\n' "$(docker exec dbm-mysql mysql -udbm -pdbm -N -e 'SE
 printf 'mariadb_version=%s\n' "$(docker exec dbm-maria mariadb -udbm -pdbm -N -e 'SELECT VERSION()')"
 
 echo "running the ignored suite with the default thread count"
-cargo test --workspace --all-features --locked -- \
+cargo test --workspace --all-features --locked --no-fail-fast -- \
   --ignored --skip pgbouncer --skip _tls_
 
 echo "starting PgBouncer"

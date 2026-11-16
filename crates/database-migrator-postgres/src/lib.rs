@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::io::Read;
 use std::net::IpAddr;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use rustls::RootCertStore;
@@ -215,6 +216,52 @@ pub(crate) fn advisory_lock_key(info: &DatabaseInfo) -> Result<i64> {
     Ok(i64::from_be_bytes(key_bytes))
 }
 
+static TEST_CONNECTION_URLS: LazyLock<Mutex<HashMap<String, String>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Selects the connection string for one `url_env` name.
+///
+/// Tests that need a private database install an override here. The crate
+/// forbids unsafe code, so a test cannot publish that URL with
+/// `std::env::set_var`, and rewriting the shared `DBM_TEST_DATABASE_URL`
+/// would race other tests in the same process.
+#[doc(hidden)]
+pub fn install_test_connection_url(variable_name: &str, url: &str) {
+    let mut urls = TEST_CONNECTION_URLS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    urls.insert(variable_name.to_owned(), url.to_owned());
+}
+
+/// Drops a connection override installed for a test.
+#[doc(hidden)]
+pub fn remove_test_connection_url(variable_name: &str) {
+    let mut urls = TEST_CONNECTION_URLS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    urls.remove(variable_name);
+}
+
+fn configured_connection_string(variable_name: &str) -> Result<String> {
+    let urls = TEST_CONNECTION_URLS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(url) = urls.get(variable_name) {
+        return Ok(url.clone());
+    }
+    drop(urls);
+    std::env::var(variable_name).map_err(|error| {
+        DbmError::Configuration(match error {
+            std::env::VarError::NotPresent => {
+                format!("PostgreSQL connection variable {variable_name} is not set")
+            }
+            std::env::VarError::NotUnicode(_) => {
+                format!("PostgreSQL connection variable {variable_name} is not valid Unicode")
+            }
+        })
+    })
+}
+
 impl DatabaseAdapter for PostgresAdapter {
     fn connect<'a>(
         &'a self,
@@ -225,16 +272,7 @@ impl DatabaseAdapter for PostgresAdapter {
             let variable_name = config.config.target.url_env.as_deref().ok_or_else(|| {
                 DbmError::Configuration("PostgreSQL target has no url_env".to_owned())
             })?;
-            let connection_string = std::env::var(variable_name).map_err(|error| {
-                DbmError::Configuration(match error {
-                    std::env::VarError::NotPresent => {
-                        format!("PostgreSQL connection variable {variable_name} is not set")
-                    }
-                    std::env::VarError::NotUnicode(_) => format!(
-                        "PostgreSQL connection variable {variable_name} is not valid Unicode"
-                    ),
-                })
-            })?;
+            let connection_string = configured_connection_string(variable_name)?;
             let (mut postgres_config, use_tls) = prepare_connection_config(
                 &connection_string,
                 config.config.target.allow_insecure_transport,
@@ -2808,8 +2846,9 @@ mod tests {
     use tokio_postgres::config::Config as PostgresConfig;
 
     use super::{
-        PostgresAdapter, advisory_lock_key, all_hosts_are_local, parse_ca_certificates,
-        prepare_connection_config,
+        PostgresAdapter, advisory_lock_key, all_hosts_are_local, configured_connection_string,
+        install_test_connection_url, parse_ca_certificates, prepare_connection_config,
+        remove_test_connection_url,
     };
     use database_migrator_core::config::{self, Environment};
     use database_migrator_core::database::{DatabaseAdapter, DatabaseSession, SessionIntent};
@@ -2821,6 +2860,25 @@ mod tests {
     };
     use database_migrator_core::storage::{FinishedRunData, LockData, PlannedRunData, StepData};
     use tokio_postgres::config::SslMode;
+
+    #[test]
+    fn test_connection_url_override_replaces_one_variable_only() {
+        let variable_name = format!("DBM_TEST_DATABASE_URL_{}", uuid::Uuid::new_v4().simple());
+        let url = "postgres://dbm@127.0.0.1:5432/dbm_private?sslmode=disable";
+        install_test_connection_url(&variable_name, url);
+
+        let resolved = configured_connection_string(&variable_name)
+            .expect("installed override replaces the missing environment variable");
+        assert_eq!(resolved, url);
+        let untouched = configured_connection_string("DBM_TEST_DATABASE_URL_DOES_NOT_EXIST")
+            .expect_err("a different variable still comes from the environment");
+        assert!(matches!(untouched, DbmError::Configuration(_)));
+
+        remove_test_connection_url(&variable_name);
+        let removed = configured_connection_string(&variable_name)
+            .expect_err("removing the override restores environment lookup");
+        assert!(matches!(removed, DbmError::Configuration(_)));
+    }
 
     #[test]
     fn parses_all_ca_certificates_and_ignores_other_pem_sections() {

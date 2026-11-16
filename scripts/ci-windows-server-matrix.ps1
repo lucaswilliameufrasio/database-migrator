@@ -95,6 +95,16 @@ if ($LASTEXITCODE -ne 0) {
     throw 'pg_ctl start failed'
 }
 
+function Write-RootTcpInit([string]$Path) {
+    # initialize-insecure creates root@localhost. TCP to 127.0.0.1 does not
+    # match that account when skip-name-resolve is on, so the server creates
+    # the TCP account before it accepts clients.
+    $sql = "CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED BY 'dbm';`nGRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;`n"
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($Path, $sql, $utf8)
+    return ($Path -replace '\\', '/')
+}
+
 $mysqlLog = Join-Path $root 'mysql.err'
 $mysqlInit = Start-Process -FilePath $mysqld -ArgumentList @(
     '--no-defaults',
@@ -109,10 +119,12 @@ if ($mysqlInit.ExitCode -ne 0) {
     }
     throw 'mysql initialize failed'
 }
+$mysqlInitSql = Write-RootTcpInit (Join-Path $root 'mysql-init.sql')
 $mysqlProc = Start-Process -FilePath $mysqld -ArgumentList @(
     '--no-defaults',
     "--datadir=$mysqlData",
     "--tmpdir=$mysqlTmp",
+    "--init-file=$mysqlInitSql",
     '--bind-address=127.0.0.1',
     '--port=3306',
     '--skip-name-resolve',
@@ -126,10 +138,12 @@ $mariaInit = Start-Process -FilePath $mariaInstall -ArgumentList @(
 if ($mariaInit.ExitCode -ne 0) {
     throw 'mariadb install db failed'
 }
+$mariaInitSql = Write-RootTcpInit (Join-Path $root 'mariadb-init.sql')
 $mariaProc = Start-Process -FilePath $mariadbd -ArgumentList @(
     '--no-defaults',
     "--datadir=$mariaData",
     "--tmpdir=$mariaTmp",
+    "--init-file=$mariaInitSql",
     '--bind-address=127.0.0.1',
     '--port=3307',
     '--skip-name-resolve',
@@ -152,12 +166,18 @@ CREATE USER 'dbm'@'127.0.0.1' IDENTIFIED BY 'dbm';
 GRANT ALL PRIVILEGES ON *.* TO 'dbm'@'127.0.0.1' WITH GRANT OPTION;
 FLUSH PRIVILEGES;
 "@
-    $mysqlSql | & $mysql --protocol=TCP -h 127.0.0.1 -P 3306 -u root
+    $mysqlSql | & $mysql --protocol=TCP -h 127.0.0.1 -P 3306 -uroot -pdbm
     if ($LASTEXITCODE -ne 0) {
+        if (Test-Path $mysqlLog) {
+            Get-Content $mysqlLog -Tail 80
+        }
         throw 'mysql user setup failed'
     }
-    $mysqlSql | & $mariadb --protocol=TCP -h 127.0.0.1 -P 3307 -u root
+    $mysqlSql | & $mariadb --protocol=TCP -h 127.0.0.1 -P 3307 -uroot -pdbm
     if ($LASTEXITCODE -ne 0) {
+        if (Test-Path $mariaLog) {
+            Get-Content $mariaLog -Tail 80
+        }
         throw 'mariadb user setup failed'
     }
 
