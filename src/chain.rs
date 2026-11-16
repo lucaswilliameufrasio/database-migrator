@@ -829,8 +829,8 @@ mod tests {
     use std::fs;
 
     use super::{
-        PhoneMigration, Snapshot, disposable_sqlite_path, is_forbidden, parse_published,
-        quote_ident, read_snapshot, reject_phone_sql, replay_sql, shipped_prefix,
+        PhoneMigration, Snapshot, is_forbidden, parse_published, quote_ident, read_snapshot,
+        reject_phone_sql, replay_sql, shipped_prefix,
     };
     use crate::error::DbmError;
     use rusqlite::Connection;
@@ -965,7 +965,7 @@ mod tests {
         let parent = tempfile::tempdir().expect("link parent");
         let link = parent.path().join("linked");
         std::os::unix::fs::symlink(real.path(), &link).expect("symlink");
-        let path = disposable_sqlite_path(&link).expect("resolved path");
+        let path = super::disposable_sqlite_path(&link).expect("resolved path");
         assert!(
             !path
                 .components()
