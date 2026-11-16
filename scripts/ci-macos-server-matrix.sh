@@ -90,6 +90,8 @@ mysql_data="${mount}/mysql"
 maria_data="${mount}/mariadb"
 mysql_socket="${mount}/mysql.sock"
 maria_socket="${mount}/mariadb.sock"
+mysql_tmp="${mount}/mysql-tmp"
+maria_tmp="${mount}/mariadb-tmp"
 mysql_client="${mount}/mysql-client.cnf"
 maria_client="${mount}/mariadb-client.cnf"
 pg_ctl=""
@@ -238,8 +240,8 @@ if [ "${probe_count}" != "2" ]; then
   exit 1
 fi
 
-mkdir -p "${pg_data}" "${mysql_data}/tmp" "${maria_data}/tmp"
-chmod 700 "${pg_data}" "${mysql_data}" "${mysql_data}/tmp" "${maria_data}" "${maria_data}/tmp"
+mkdir -p "${pg_data}" "${mysql_data}" "${maria_data}" "${mysql_tmp}" "${maria_tmp}"
+chmod 700 "${pg_data}" "${mysql_data}" "${maria_data}" "${mysql_tmp}" "${maria_tmp}"
 
 "${pg_initdb}" --locale=en_US.UTF-8 --encoding=UTF-8 --username=dbm \
   --auth=trust --auth-host=trust "${pg_data}"
@@ -267,17 +269,23 @@ protocol=TCP
 host=127.0.0.1
 EOF
 
-"${mysql_server}" \
+if ! "${mysql_server}" \
   --no-defaults \
   --initialize-insecure \
   --datadir="${mysql_data}" \
-  --tmpdir="${mysql_data}/tmp" \
+  --tmpdir="${mysql_tmp}" \
   --lower_case_table_names=0 \
-  --log-error="${mount}/mysql-init.err"
+  --log-error="${mount}/mysql-init.err"; then
+  echo "mysql initialize failed" >&2
+  if [ -f "${mount}/mysql-init.err" ]; then
+    tail -n 50 "${mount}/mysql-init.err" >&2
+  fi
+  exit 1
+fi
 "${mysql_server}" \
   --no-defaults \
   --datadir="${mysql_data}" \
-  --tmpdir="${mysql_data}/tmp" \
+  --tmpdir="${mysql_tmp}" \
   --bind-address=127.0.0.1 \
   --port=3306 \
   --socket="${mysql_socket}" \
@@ -293,25 +301,26 @@ mysql_pid=$!
 # disposable account be created over the local socket.
 # The runner can delete a file in its default temp directory while bootstrap
 # still needs it, and MariaDB then aborts on mysql.tmp_user_sys. The temp
-# directory stays inside this datadir. One fresh retry covers a partial init.
+# directory stays on this volume, beside the datadir: initialize refuses a
+# datadir that is not empty. One fresh retry covers a partial init.
 install_maria() {
   "${maria_install}" \
     --no-defaults \
     --datadir="${maria_data}" \
-    --tmpdir="${maria_data}/tmp" \
+    --tmpdir="${maria_tmp}" \
     --auth-root-authentication-method=normal
 }
 if ! install_maria; then
   echo "mariadb-install-db failed; retrying once with a fresh datadir" >&2
-  rm -rf "${maria_data}"
-  mkdir -p "${maria_data}/tmp"
-  chmod 700 "${maria_data}" "${maria_data}/tmp"
+  rm -rf "${maria_data}" "${maria_tmp}"
+  mkdir -p "${maria_data}" "${maria_tmp}"
+  chmod 700 "${maria_data}" "${maria_tmp}"
   install_maria
 fi
 "${maria_server}" \
   --no-defaults \
   --datadir="${maria_data}" \
-  --tmpdir="${maria_data}/tmp" \
+  --tmpdir="${maria_tmp}" \
   --bind-address=127.0.0.1 \
   --port=3307 \
   --socket="${maria_socket}" \
