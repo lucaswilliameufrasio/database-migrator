@@ -1,6 +1,17 @@
+[workspace]
+resolver = "3"
+members = [
+    ".",
+    "crates/database-migrator-core",
+    "crates/database-migrator-sqlite",
+    "crates/database-migrator-postgres",
+    "crates/database-migrator-mysql",
+]
+exclude = ["fuzz"]
+
 [package]
 name = "database-migrator"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 rust-version = "1.89"
 license = "MIT OR Apache-2.0"
@@ -14,6 +25,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "dbm"
 path = "src/main.rs"
+required-features = ["cli"]
 
 [[bin]]
 name = "dbm-test-runner"
@@ -22,35 +34,49 @@ required-features = ["test-runner-fixture"]
 test = false
 bench = false
 
+[[example]]
+name = "sqlite_embedded_migration"
+required-features = ["sqlite"]
+
+[[example]]
+name = "sqlite_schema_dsl"
+required-features = ["sqlite", "dsl"]
+
 [features]
-default = []
-ai = ["dep:cap-fs-ext", "dep:reqwest"]
-test-runner-fixture = []
+default = ["sqlite", "postgres", "mysql", "cli", "runner", "legacy", "dsl"]
+sqlite = ["dep:database-migrator-sqlite"]
+postgres = ["dep:database-migrator-postgres", "dep:tokio-postgres"]
+# MySQL and MariaDB share this driver.
+mysql = ["dep:database-migrator-mysql", "dep:mysql_async"]
+# dbm commands for the runner protocol and legacy import.
+cli = ["dep:clap", "database-migrator-core/cli", "runner", "legacy"]
+runner = []
+legacy = []
+dsl = []
+ai = ["dep:cap-fs-ext", "dep:reqwest", "dep:rustls"]
+test-runner-fixture = ["dsl", "runner"]
 fuzzing-harness = []
 
 [dependencies]
-clap = { version = "4.6.7", features = ["derive"] }
+database-migrator-core = { version = "=1.0.0", path = "crates/database-migrator-core" }
+database-migrator-mysql = { version = "=1.0.0", path = "crates/database-migrator-mysql", optional = true }
+database-migrator-postgres = { version = "=1.0.0", path = "crates/database-migrator-postgres", optional = true }
+database-migrator-sqlite = { version = "=1.0.0", path = "crates/database-migrator-sqlite", optional = true }
+clap = { version = "4.6.7", features = ["derive"], optional = true }
 cap-std = "4.0.3"
 cap-fs-ext = { version = "4.0.3", optional = true }
-mysql_async = { version = "0.37.1", default-features = false, features = ["default-rustls-ring"] }
 rusqlite = { version = "0.41.1", features = ["bundled", "hooks"] }
-reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"], optional = true }
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls-no-provider"], optional = true }
+# ring only. mysql_async calls ClientConfig::builder(), which panics when aws-lc-rs is enabled beside ring.
+rustls = { version = "0.23.0", default-features = false, features = ["ring", "std", "tls12"], optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"
-thiserror = "2.0.21"
 tempfile = "3.27.0"
-time = { version = "0.3.55", features = ["formatting", "parsing"] }
-rustls = { version = "0.23.0", default-features = false, features = ["ring", "std", "tls12"] }
-rustls-pki-types = "1.15.1"
+mysql_async = { version = "0.37.1", default-features = false, features = ["default-rustls-ring"], optional = true }
 tokio = { version = "1.51.0", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
-tokio-postgres = "0.7.18"
-tokio-postgres-rustls = { version = "0.14.0", features = ["ring"] }
-toml = "1.1.8"
+tokio-postgres = { version = "0.7.18", optional = true }
 uuid = { version = "1.29.0", features = ["v4"] }
-webpki-roots = "1.0.3"
-
-[dev-dependencies]
 
 [lints.rust]
 unsafe_code = "forbid"

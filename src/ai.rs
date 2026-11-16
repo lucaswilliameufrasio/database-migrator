@@ -552,7 +552,6 @@ fn read_context_file(
         .map_err(|error| DbmError::io(path.display(), error))?;
 
     read_context_file_from_canonical(
-        project_root,
         &project_directory,
         config,
         &canonical_relative_path,
@@ -563,7 +562,6 @@ fn read_context_file(
 }
 
 fn read_context_file_from_canonical(
-    project_root: &Path,
     project_directory: &Dir,
     config: &LoadedConfig,
     canonical_relative_path: &Path,
@@ -585,20 +583,23 @@ fn read_context_file_from_canonical(
         ));
     }
     if require_migration_source {
-        let is_source_file = config.source_dirs.iter().any(|source| {
-            source
-                .path
-                .strip_prefix(project_root)
-                .ok()
-                .and_then(|source_path| project_directory.canonicalize(source_path).ok())
-                .is_some_and(|source_path| canonical_relative_path.starts_with(source_path))
-        });
-        if !is_source_file
-            || canonical_relative_path
-                .extension()
-                .and_then(|value| value.to_str())
-                != Some("sql")
-        {
+        // `source.path` can keep a non-canonical absolute prefix. macOS
+        // resolves `/var` to `/private/var`, and Windows adds a `\\?\` prefix.
+        // The configured relative source is compared inside this directory.
+        let mut is_source_file = false;
+        for source in &config.source_dirs {
+            let Ok(source_path) = project_directory.canonicalize(&source.relative_path) else {
+                continue;
+            };
+            if canonical_relative_path.starts_with(&source_path) {
+                is_source_file = true;
+                break;
+            }
+        }
+        let extension = canonical_relative_path
+            .extension()
+            .and_then(|value| value.to_str());
+        if !is_source_file || extension != Some("sql") {
             return Err(ai_error(
                 "AI_CONTEXT_PATH_INVALID",
                 "migration context must be a .sql file inside a configured migration source",
@@ -1148,6 +1149,9 @@ impl OpenAiCompatibleProvider {
         );
         let endpoint = reqwest::Url::parse(&endpoint_text)
             .map_err(|_| ai_error("AI_ENDPOINT_INVALID", "the AI profile endpoint is invalid"))?;
+        if rustls::crypto::CryptoProvider::get_default().is_none() {
+            let _installed = rustls::crypto::ring::default_provider().install_default();
+        }
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(profile.timeout_seconds))
             .redirect(reqwest::redirect::Policy::none())
@@ -1334,19 +1338,25 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
-    use cap_std::ambient_authority;
-    use cap_std::fs::Dir;
+    #[cfg(unix)]
+    use cap_std::{ambient_authority, fs::Dir};
     use serde_json::{Value, json};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
     use tokio::task::JoinHandle;
 
     use super::{
-        AiAction, AiExecutionOptions, AiProvider, MAX_CONTEXT_FILE_BYTES, MigrationProposal,
-        OpenAiCompatibleProvider, ProposalFile, ProposalFileType, ReviewReport, build_messages,
-        parse_and_validate_response, read_context_file_from_canonical, redact_json,
-        redact_sensitive_text, safe_sql_basename, validate_approved_endpoint,
+        AiAction, AiExecutionOptions, AiProvider, MigrationProposal, OpenAiCompatibleProvider,
+        ProposalFile, ProposalFileType, ReviewReport, build_messages, parse_and_validate_response,
+        redact_json, redact_sensitive_text, safe_sql_basename, validate_approved_endpoint,
     };
+
+    #[test]
+    fn ai_feature_does_not_make_the_rustls_provider_ambiguous() {
+        let _builder = rustls::ClientConfig::builder();
+    }
+    #[cfg(unix)]
+    use super::{MAX_CONTEXT_FILE_BYTES, read_context_file_from_canonical};
     use crate::config::{
         AiConfig, AiProfileConfig, Environment, ExecutionConfig, LoadedConfig, ProjectDirectory,
         SourceDir, TargetConfig,
@@ -1557,15 +1567,15 @@ mod tests {
             .is_err()
         );
 
-        let source = directory.path().join("migrations/versioned");
-        let outside_file = outside.path().join("linked.sql");
-        fs::write(
-            &outside_file,
-            "-- dbm:up\nCREATE TABLE leaked (id INTEGER);\n",
-        )
-        .expect("write external context file");
         #[cfg(unix)]
         {
+            let source = directory.path().join("migrations/versioned");
+            let outside_file = outside.path().join("linked.sql");
+            fs::write(
+                &outside_file,
+                "-- dbm:up\nCREATE TABLE leaked (id INTEGER);\n",
+            )
+            .expect("write external context file");
             std::os::unix::fs::symlink(&outside_file, source.join("linked.sql"))
                 .expect("create out-of-project context symlink");
             assert!(
@@ -1636,7 +1646,6 @@ mod tests {
             .expect("replace context file with external symlink");
 
         let result = read_context_file_from_canonical(
-            project.path(),
             &project_directory,
             &config,
             &canonical_relative_path,
@@ -1662,7 +1671,6 @@ mod tests {
             .expect("replace context file with internal symlink");
 
         let result = read_context_file_from_canonical(
-            project.path(),
             &project_directory,
             &config,
             &canonical_relative_path,
@@ -1712,7 +1720,6 @@ mod tests {
             .expect("replace nested migration directory with external symlink");
 
         let result = read_context_file_from_canonical(
-            project.path(),
             &project_directory,
             &config,
             &canonical_relative_path,

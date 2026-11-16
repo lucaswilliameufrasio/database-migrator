@@ -1,0 +1,28 @@
+[package]
+name = "database-migrator-postgres"
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "PostgreSQL driver for database-migrator"
+
+[dependencies]
+database-migrator-core = { version = "=1.0.0", path = "../database-migrator-core" }
+rustls = { version = "0.23.0", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pki-types = "1.15.1"
+sha2 = "0.11.1"
+tokio = { version = "1.51.0", features = ["macros", "rt-multi-thread"] }
+tokio-postgres = "0.7.18"
+tokio-postgres-rustls = { version = "0.14.0", features = ["ring"] }
+uuid = { version = "1.29.0", features = ["v4"] }
+webpki-roots = "1.0.3"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"

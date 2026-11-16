@@ -1562,11 +1562,12 @@ mod tests {
 
     use super::{
         LEGACY_METADATA_FORMAT_VERSION, METADATA_FORMAT_VERSION, ensure_schema, metadata_presence,
-        metadata_v4_presence, open_mutable, open_readonly, read_snapshot,
-        read_snapshot_from_connection, upgrade_metadata_v1_to_current,
-        upgrade_metadata_v2_to_current, upgrade_metadata_v3_to_current,
-        upgrade_metadata_v4_to_current,
+        metadata_v4_presence, read_snapshot, read_snapshot_from_connection,
+        upgrade_metadata_v1_to_current, upgrade_metadata_v2_to_current,
+        upgrade_metadata_v3_to_current, upgrade_metadata_v4_to_current,
     };
+    #[cfg(unix)]
+    use super::{open_mutable, open_readonly};
     use crate::config::{
         Environment, ExecutionConfig, LoadedConfig, ProjectDirectory, SourceDir, TargetConfig,
     };

@@ -1,0 +1,2 @@
+ALTER TABLE expense ADD COLUMN category TEXT NOT NULL DEFAULT 'geral';
+

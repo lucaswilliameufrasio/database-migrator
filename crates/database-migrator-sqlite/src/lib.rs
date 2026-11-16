@@ -6,14 +6,18 @@ use rusqlite::Connection;
 use rusqlite::hooks::{AuthAction, Authorization};
 use tokio::sync::oneshot;
 
-use crate::async_runtime::run_blocking;
-use crate::config::LoadedConfig;
-use crate::error::{DbmError, Result};
-use crate::storage::{self, FinishedRunData, LockData, MetadataSnapshot, PlannedRunData, StepData};
+use database_migrator_core::async_runtime::run_blocking;
+use database_migrator_core::config::LoadedConfig;
+use database_migrator_core::error::{DbmError, Result};
+use database_migrator_core::storage::{
+    self, FinishedRunData, LockData, MetadataSnapshot, PlannedRunData, StepData,
+};
 
-use super::{BoxFuture, DatabaseAdapter, DatabaseInfo, DatabaseSession, SessionIntent};
+use database_migrator_core::database::{
+    BoxFuture, DatabaseAdapter, DatabaseInfo, DatabaseSession, SessionIntent,
+};
 
-pub(crate) struct SqliteAdapter;
+pub struct SqliteAdapter;
 
 impl DatabaseAdapter for SqliteAdapter {
     fn connect<'a>(
@@ -82,7 +86,7 @@ enum SqliteCommand {
         reply: oneshot::Sender<Result<()>>,
     },
     InsertPlannedRun {
-        migration: crate::migration::Migration,
+        migration: database_migrator_core::migration::Migration,
         run_id: String,
         batch_id: String,
         direction: String,
@@ -124,12 +128,12 @@ enum SqliteCommand {
         reply: oneshot::Sender<Result<()>>,
     },
     InsertApplied {
-        migration: crate::migration::Migration,
+        migration: database_migrator_core::migration::Migration,
         applied_at: String,
         reply: oneshot::Sender<Result<()>>,
     },
     DeleteApplied {
-        migration: crate::migration::Migration,
+        migration: database_migrator_core::migration::Migration,
         reply: oneshot::Sender<Result<()>>,
     },
     FinishRun {
@@ -238,7 +242,7 @@ impl DatabaseSession for SqliteSession {
 
     fn insert_planned_run<'a>(
         &'a mut self,
-        migration: &'a crate::migration::Migration,
+        migration: &'a database_migrator_core::migration::Migration,
         run: PlannedRunData<'a>,
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -358,7 +362,7 @@ impl DatabaseSession for SqliteSession {
 
     fn insert_applied<'a>(
         &'a mut self,
-        migration: &'a crate::migration::Migration,
+        migration: &'a database_migrator_core::migration::Migration,
         applied_at: &'a str,
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -376,7 +380,7 @@ impl DatabaseSession for SqliteSession {
 
     fn delete_applied<'a>(
         &'a mut self,
-        migration: &'a crate::migration::Migration,
+        migration: &'a database_migrator_core::migration::Migration,
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             self.ensure_writable()?;
@@ -1018,13 +1022,13 @@ fn worker_closed_error() -> DbmError {
 #[cfg(test)]
 mod tests {
     use super::{SessionIntent, SqliteAdapter};
-    use crate::config;
-    use crate::database::DatabaseAdapter;
-    use crate::identity::MigrationIdentity;
-    use crate::migration::{
+    use database_migrator_core::config;
+    use database_migrator_core::database::DatabaseAdapter;
+    use database_migrator_core::identity::MigrationIdentity;
+    use database_migrator_core::migration::{
         Migration, MigrationFormat, MigrationKind, SqlDialect, TransactionPolicy,
     };
-    use crate::storage::{FinishedRunData, LockData, PlannedRunData, StepData};
+    use database_migrator_core::storage::{FinishedRunData, LockData, PlannedRunData, StepData};
 
     fn sample_migration() -> Migration {
         Migration {
@@ -1114,12 +1118,12 @@ mod tests {
         let inspection = rusqlite::Connection::open(&database_path)
             .expect("reopen SQLite target after bootstrap rollback");
         assert_eq!(
-            crate::storage::metadata_presence(&inspection)
+            database_migrator_core::storage::metadata_presence(&inspection)
                 .expect("count core metadata tables after rollback"),
             0
         );
         assert_eq!(
-            crate::storage::metadata_v4_presence(&inspection)
+            database_migrator_core::storage::metadata_v4_presence(&inspection)
                 .expect("count all current metadata tables after rollback"),
             0
         );

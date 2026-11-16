@@ -1,0 +1,2 @@
+# up SQL checksums. The phone hashes these bytes, not the migration file.
+20261116000000000001 sha256:raw:v1:8e10edd69e26b661b2b3ec4863d30ffe75f7500456229b6810bf900767a6fb15

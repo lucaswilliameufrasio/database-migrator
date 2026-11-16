@@ -6,6 +6,7 @@ use serde::Serialize;
 
 use crate::config::LoadedConfig;
 use crate::database::DatabaseInfo;
+#[cfg(feature = "dsl")]
 use crate::dsl::{ResultShape, SafetyClass, SchemaDialect, SchemaMigration};
 use crate::error::{DbmError, Result};
 use crate::identity::{
@@ -130,6 +131,7 @@ enum RegistryEntry {
         up: String,
         down: Option<String>,
     },
+    #[cfg(feature = "dsl")]
     Dsl {
         metadata: MigrationMetadata,
         dialect: SchemaDialect,
@@ -171,6 +173,7 @@ impl MigrationRegistry {
     }
 
     /// Registers an immutable DSL migration with an explicitly selected compiler dialect.
+    #[cfg(feature = "dsl")]
     pub fn register_dsl(
         &mut self,
         metadata: MigrationMetadata,
@@ -252,6 +255,7 @@ impl MigrationRegistry {
                     }
                     materialize_sql(metadata, *dialect, up, down.as_deref(), "embedded-sql")?
                 }
+                #[cfg(feature = "dsl")]
                 RegistryEntry::Dsl {
                     metadata,
                     dialect,
@@ -328,6 +332,11 @@ impl MigrationRegistry {
     }
 
     pub(crate) fn validate_database_info(&self, info: &DatabaseInfo) -> Result<()> {
+        #[cfg(not(feature = "dsl"))]
+        {
+            let _ = (self, info);
+        }
+        #[cfg(feature = "dsl")]
         for entry in &self.entries {
             let RegistryEntry::Dsl {
                 metadata, dialect, ..
@@ -361,9 +370,9 @@ impl MigrationRegistry {
                 metadata,
                 migration,
             } if metadata.identity == *identity => Some(Arc::clone(migration)),
-            RegistryEntry::Sql { .. } | RegistryEntry::Dsl { .. } | RegistryEntry::Rust { .. } => {
-                None
-            }
+            #[cfg(feature = "dsl")]
+            RegistryEntry::Dsl { .. } => None,
+            RegistryEntry::Sql { .. } | RegistryEntry::Rust { .. } => None,
         })
     }
 }
@@ -371,9 +380,9 @@ impl MigrationRegistry {
 impl RegistryEntry {
     fn metadata(&self) -> &MigrationMetadata {
         match self {
-            Self::Sql { metadata, .. }
-            | Self::Dsl { metadata, .. }
-            | Self::Rust { metadata, .. } => metadata,
+            Self::Sql { metadata, .. } | Self::Rust { metadata, .. } => metadata,
+            #[cfg(feature = "dsl")]
+            Self::Dsl { metadata, .. } => metadata,
         }
     }
 }
@@ -462,6 +471,7 @@ fn validate_statement_list(
     Ok(())
 }
 
+#[cfg(feature = "dsl")]
 fn compiled_sql(
     statements: &[crate::dsl::CompiledStatement],
     metadata: &MigrationMetadata,
@@ -527,6 +537,7 @@ fn append_fingerprint_part(material: &mut Vec<u8>, value: &[u8]) {
     material.extend_from_slice(value);
 }
 
+#[cfg(feature = "dsl")]
 fn schema_to_sql_dialect(dialect: SchemaDialect) -> SqlDialect {
     match dialect {
         SchemaDialect::Sqlite => SqlDialect::Sqlite,
@@ -564,6 +575,7 @@ fn validate_virtual_name(value: &str, label: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "dsl")]
     use crate::dsl::{SchemaBuilder, SchemaDialect, SchemaMigration};
     use crate::error::DbmError;
     use crate::identity::MigrationIdentity;
@@ -635,6 +647,7 @@ mod tests {
         assert!(matches!(result, Err(DbmError::InvalidMigration { .. })));
     }
 
+    #[cfg(feature = "dsl")]
     #[test]
     fn schema_registration_keeps_explicit_dialect_and_up_down() {
         let mut up = SchemaBuilder::new();

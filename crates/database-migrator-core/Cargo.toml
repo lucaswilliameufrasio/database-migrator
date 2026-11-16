@@ -1,0 +1,33 @@
+[package]
+name = "database-migrator-core"
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "Internal types for the database-migrator workspace"
+
+[features]
+cli = ["dep:clap"]
+
+[dependencies]
+cap-std = "4.0.3"
+clap = { version = "4.6.7", features = ["derive"], optional = true }
+rusqlite = { version = "0.41.1", features = ["bundled", "hooks"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+thiserror = "2.0.21"
+time = { version = "0.3.55", features = ["formatting", "parsing"] }
+tokio = { version = "1.51.0", features = ["macros", "rt-multi-thread"] }
+toml = "1.1.8"
+uuid = { version = "1.29.0", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"

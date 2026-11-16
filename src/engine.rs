@@ -216,6 +216,7 @@ pub struct ExecutionReport {
     pub migrations: Vec<String>,
 }
 
+#[cfg(feature = "runner")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RunnerAction {
     Validate,
@@ -228,6 +229,7 @@ pub(crate) enum RunnerAction {
     PlanDown { steps: usize },
 }
 
+#[cfg(feature = "runner")]
 pub(crate) struct RunnerPreflight {
     pub(crate) manifest_fingerprint: String,
     pub(crate) plan_hash: String,
@@ -3467,6 +3469,7 @@ pub async fn plan_with_registry_async(
     Ok(report)
 }
 
+#[cfg(feature = "runner")]
 pub(crate) async fn runner_preflight(
     config: &LoadedConfig,
     registry: &MigrationRegistry,
@@ -3588,6 +3591,7 @@ pub(crate) async fn runner_preflight(
     })
 }
 
+#[cfg(feature = "runner")]
 fn runner_operation_hash(base_hash: &str, direction: &str, steps: usize) -> String {
     let mut hasher = Sha256::new();
     hasher.update(b"dbm-runner-operation-v1\0");
@@ -3617,6 +3621,7 @@ fn target_fingerprint(config: &LoadedConfig, info: &database::DatabaseInfo) -> S
     format!("sha256:{}", hex_digest(hasher.finalize().as_slice()))
 }
 
+#[cfg(feature = "runner")]
 fn configured_target_fingerprint(config: &LoadedConfig) -> String {
     let mut hasher = Sha256::new();
     hasher.update(b"dbm-configured-target-v1\0");
@@ -3653,6 +3658,7 @@ pub async fn up_with_registry_async(
     execute_with_adapter(config, "up", 0, Some(registry), None).await
 }
 
+#[cfg(feature = "runner")]
 pub(crate) async fn up_with_registry_authorized_async(
     config: &LoadedConfig,
     registry: &MigrationRegistry,
@@ -3670,6 +3676,7 @@ pub async fn down_with_registry_async(
     execute_with_adapter(config, "down", steps, Some(registry), None).await
 }
 
+#[cfg(feature = "runner")]
 pub(crate) async fn down_with_registry_authorized_async(
     config: &LoadedConfig,
     registry: &MigrationRegistry,
@@ -5277,41 +5284,89 @@ mod tests {
         fs::write(config.source_dirs[0].path.join(name), sql).expect("write migration");
     }
 
-    async fn set_test_role_search_path(database_url: &str, schema: &str, enabled: bool) {
-        let (client, connection) = tokio_postgres::connect(database_url, tokio_postgres::NoTls)
-            .await
-            .expect("connect to disposable PostgreSQL to set test role search path");
-        let connection_task = tokio::spawn(connection);
-        let statement = if enabled {
-            client
-                .query_one(
-                    "SELECT format(\
-                         'ALTER ROLE %I IN DATABASE %I SET search_path TO %I, public', \
-                         current_user, current_database(), $1::text)",
-                    &[&schema],
-                )
+    struct PrivatePostgresDatabase {
+        name: String,
+        variable_name: String,
+        url: String,
+        admin_url: String,
+    }
+
+    impl PrivatePostgresDatabase {
+        async fn create(admin_url: &str) -> Self {
+            let name = format!("dbm_{}", uuid::Uuid::new_v4().simple());
+            assert!(
+                name.len() <= 63
+                    && name.bytes().all(|byte| byte.is_ascii_lowercase()
+                        || byte.is_ascii_digit()
+                        || byte == b'_')
+            );
+            let (client, connection) = tokio_postgres::connect(admin_url, tokio_postgres::NoTls)
                 .await
-                .expect("build safely quoted test role search-path statement")
-                .get::<_, String>(0)
-        } else {
+                .expect("connect to create a private PostgreSQL database");
+            let connection_task = tokio::spawn(connection);
             client
-                .query_one(
-                    "SELECT format(\
-                         'ALTER ROLE %I IN DATABASE %I RESET search_path', \
-                         current_user, current_database())",
-                    &[],
-                )
+                .batch_execute(&format!("CREATE DATABASE {name}"))
                 .await
-                .expect("build test role search-path reset statement")
-                .get::<_, String>(0)
+                .expect("create a private PostgreSQL database");
+            drop(client);
+            connection_task.abort();
+            let _ = connection_task.await;
+            let url = postgres_url_with_database(admin_url, &name);
+            let variable_name = format!("DBM_TEST_DATABASE_URL_{name}");
+            database_migrator_postgres::install_test_connection_url(&variable_name, &url);
+            Self {
+                name,
+                variable_name,
+                url,
+                admin_url: admin_url.to_owned(),
+            }
+        }
+
+        async fn drop_database(self) {
+            database_migrator_postgres::remove_test_connection_url(&self.variable_name);
+            let (client, connection) =
+                tokio_postgres::connect(&self.admin_url, tokio_postgres::NoTls)
+                    .await
+                    .expect("connect to drop a private PostgreSQL database");
+            let connection_task = tokio::spawn(connection);
+            client
+                .batch_execute(&format!("DROP DATABASE {} WITH (FORCE)", self.name))
+                .await
+                .expect("drop a private PostgreSQL database");
+            drop(client);
+            connection_task.abort();
+            let _ = connection_task.await;
+        }
+    }
+
+    fn postgres_url_with_database(database_url: &str, database_name: &str) -> String {
+        let (without_query, query) = match database_url.split_once('?') {
+            Some((path, query)) => (path, Some(query)),
+            None => (database_url, None),
         };
-        client
-            .batch_execute(&statement)
-            .await
-            .expect("update disposable PostgreSQL test role search path");
-        drop(client);
-        connection_task.abort();
-        let _ = connection_task.await;
+        let (prefix, current_name) = without_query
+            .rsplit_once('/')
+            .expect("PostgreSQL URL includes a database name");
+        assert!(!current_name.is_empty() && !prefix.is_empty());
+        match query {
+            Some(query) => format!("{prefix}/{database_name}?{query}"),
+            None => format!("{prefix}/{database_name}"),
+        }
+    }
+
+    #[test]
+    fn postgres_url_with_database_replaces_only_the_database_name() {
+        assert_eq!(
+            postgres_url_with_database(
+                "postgres://dbm@127.0.0.1:5432/dbm?sslmode=disable",
+                "dbm_private"
+            ),
+            "postgres://dbm@127.0.0.1:5432/dbm_private?sslmode=disable"
+        );
+        assert_eq!(
+            postgres_url_with_database("postgres://dbm@127.0.0.1:5432/dbm", "dbm_private"),
+            "postgres://dbm@127.0.0.1:5432/dbm_private"
+        );
     }
 
     fn repair_plan_json(
@@ -5726,6 +5781,7 @@ mod tests {
                 Host::Tcp(host) => host
                     .parse::<IpAddr>()
                     .is_ok_and(|address| address.is_loopback()),
+                #[cfg(unix)]
                 Host::Unix(_) => true,
             }
         }));
@@ -6056,6 +6112,37 @@ mod tests {
             .close()
             .await
             .expect("close MySQL-family reconciliation verification session");
+
+        // The shared URL database is reused by later ignored tests. This test
+        // initializes metadata there and must remove only those tables.
+        let cleanup_url = std::env::var(environment_variable).unwrap_or_else(|_| {
+            panic!("{environment_variable} must still identify the test target")
+        });
+        let mut cleanup =
+            mysql_async::Conn::new(mysql_async::Opts::from_url(&cleanup_url).unwrap_or_else(
+                |_| panic!("{environment_variable} must still be a valid MySQL URL"),
+            ))
+            .await
+            .expect("reconnect to remove metadata from the shared test database");
+        for statement in [
+            "DROP TABLE IF EXISTS schema_migration_steps",
+            "DROP TABLE IF EXISTS schema_migration_locks",
+            "DROP TABLE IF EXISTS schema_migrations",
+            "DROP TABLE IF EXISTS schema_migration_adoptions",
+            "DROP TABLE IF EXISTS schema_migration_import_events",
+            "DROP TABLE IF EXISTS schema_migration_imports",
+            "DROP TABLE IF EXISTS schema_migration_runs",
+            "DROP TABLE IF EXISTS schema_migration_meta",
+        ] {
+            cleanup
+                .query_drop(statement)
+                .await
+                .expect("remove DBM metadata from the shared test database");
+        }
+        cleanup
+            .disconnect()
+            .await
+            .expect("close shared test database cleanup connection");
     }
 
     #[tokio::test]
@@ -6090,6 +6177,7 @@ mod tests {
                 Host::Tcp(host) => host
                     .parse::<IpAddr>()
                     .is_ok_and(|address| address.is_loopback()),
+                #[cfg(unix)]
                 Host::Unix(_) => true,
             }
         }));
@@ -6338,28 +6426,25 @@ mod tests {
                 Host::Tcp(host) => host
                     .parse::<IpAddr>()
                     .is_ok_and(|address| address.is_loopback()),
+                #[cfg(unix)]
                 Host::Unix(_) => true,
             }
         }));
         assert!(parsed.get_hostaddrs().iter().all(IpAddr::is_loopback));
 
-        let schema = format!("dbm_namespace_race_{}", uuid::Uuid::new_v4().simple());
+        let private_database = PrivatePostgresDatabase::create(&database_url).await;
+        let schema = "public".to_owned();
         let table = format!("shared_namespace_object_{}", uuid::Uuid::new_v4().simple());
         let marker = format!("dbm_namespace_race_{}", uuid::Uuid::new_v4().simple());
         let (admin, admin_connection) =
-            tokio_postgres::connect(&database_url, tokio_postgres::NoTls)
+            tokio_postgres::connect(&private_database.url, tokio_postgres::NoTls)
                 .await
-                .expect("connect to disposable PostgreSQL for schema setup");
+                .expect("connect to the private PostgreSQL database");
         let admin_task = tokio::spawn(admin_connection);
-        admin
-            .batch_execute(&format!("CREATE SCHEMA {schema}"))
-            .await
-            .expect("create isolated namespace-race schema");
-        set_test_role_search_path(&database_url, &schema, true).await;
 
         first_config.config.target.driver = "postgres".to_owned();
         first_config.config.target.database = None;
-        first_config.config.target.url_env = Some("DBM_TEST_DATABASE_URL".to_owned());
+        first_config.config.target.url_env = Some(private_database.variable_name.clone());
         first_config.config.target.allow_insecure_transport = true;
         first_config.config.target.environment = crate::config::Environment::Test;
         first_config.config.namespace = format!("ns_a_{}", uuid::Uuid::new_v4().simple());
@@ -6573,14 +6658,10 @@ mod tests {
             .get(0);
         assert_eq!(shared_table_count, 1);
 
-        set_test_role_search_path(&database_url, &schema, false).await;
-        admin
-            .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
-            .await
-            .expect("drop isolated namespace-race schema");
         drop(admin);
         admin_task.abort();
         let _ = admin_task.await;
+        private_database.drop_database().await;
     }
 
     #[tokio::test]
@@ -6603,6 +6684,7 @@ mod tests {
                 Host::Tcp(host) => host
                     .parse::<IpAddr>()
                     .is_ok_and(|address| address.is_loopback()),
+                #[cfg(unix)]
                 Host::Unix(_) => true,
             }
         }));
@@ -6892,15 +6974,17 @@ mod tests {
                 Host::Tcp(host) => host
                     .parse::<IpAddr>()
                     .is_ok_and(|address| address.is_loopback()),
+                #[cfg(unix)]
                 Host::Unix(_) => true,
             }
         }));
         assert!(parsed.get_hostaddrs().iter().all(IpAddr::is_loopback));
 
+        let private_database = PrivatePostgresDatabase::create(&database_url).await;
         let mut config = sqlite_config;
         config.config.target.driver = "postgres".to_owned();
         config.config.target.database = None;
-        config.config.target.url_env = Some("DBM_TEST_DATABASE_URL".to_owned());
+        config.config.target.url_env = Some(private_database.variable_name.clone());
         config.config.target.allow_insecure_transport = true;
         config.config.target.environment = crate::config::Environment::Test;
         config.database_path = None;
@@ -6917,31 +7001,6 @@ mod tests {
             .connect(&config, SessionIntent::ReadWrite)
             .await
             .expect("connect to disposable PostgreSQL");
-        let schema = format!("dbm_indeterminate_test_{}", uuid::Uuid::new_v4().simple());
-        session
-            .begin()
-            .await
-            .expect("begin isolated PostgreSQL schema creation");
-        session
-            .execute_statement(&format!("CREATE SCHEMA {schema}"))
-            .await
-            .expect("create isolated PostgreSQL schema");
-        session
-            .commit()
-            .await
-            .expect("commit isolated PostgreSQL schema creation");
-        session
-            .begin()
-            .await
-            .expect("begin isolated PostgreSQL search-path setup");
-        session
-            .execute_statement(&format!("SET search_path TO {schema}"))
-            .await
-            .expect("set isolated PostgreSQL schema search path");
-        session
-            .commit()
-            .await
-            .expect("commit isolated PostgreSQL search-path setup");
         let initial_snapshot = session
             .read_snapshot(&config.config.namespace)
             .await
@@ -6993,7 +7052,6 @@ mod tests {
             .close()
             .await
             .expect("close indeterminate migration session");
-        set_test_role_search_path(&database_url, &schema, true).await;
         let doctor_report = doctor_async(&config)
             .await
             .expect("diagnose PostgreSQL non-transactional outcome");
@@ -7111,27 +7169,7 @@ mod tests {
             .close()
             .await
             .expect("close reconciled migration verification session");
-        set_test_role_search_path(&database_url, &schema, false).await;
-        let mut cleanup = adapter
-            .connect(&config, SessionIntent::ReadWrite)
-            .await
-            .expect("connect for isolated schema cleanup");
-        cleanup
-            .begin()
-            .await
-            .expect("begin isolated PostgreSQL schema cleanup");
-        cleanup
-            .execute_statement(&format!("DROP SCHEMA {schema} CASCADE"))
-            .await
-            .expect("drop isolated PostgreSQL schema");
-        cleanup
-            .commit()
-            .await
-            .expect("commit isolated PostgreSQL schema cleanup");
-        cleanup
-            .close()
-            .await
-            .expect("close PostgreSQL cleanup session");
+        private_database.drop_database().await;
     }
 
     #[test]

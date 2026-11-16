@@ -2,8 +2,11 @@
 
 Release 1.0.0 declares Linux x86_64 and the server lines below. The 2026-11-13
 revalidation of the current commit is recorded after the historical runs. Those
-older paragraphs stay as written. macOS, Windows, and any server version not
-listed here are outside this release.
+older paragraphs stay as written. Server versions not listed here stay outside
+that release. The later SQLite CI on macOS and Windows is in the operating-system
+row and does not replace the 1.0.0 Linux evidence. The 2026-11-16 macOS
+server fault matrix is in that same row. It does not add Windows server
+support and does not replace the Linux 1.0.0 evidence.
 
 ## Database servers
 
@@ -12,7 +15,7 @@ listed here are outside this release.
 | SQLite | Bundled through `rusqlite 0.40.2` as SQLite 3.53.2 by default; SQLite 3.54.1 was linked for the 2026-11-07 local suite | Default automated suite covers transactional migrations, rollback, metadata, and recovery. The full suite also passed against official SQLite 3.54.1 using a local `pkg-config` override; this does not change the runtime bundled in normal builds. The #11 rollback-before-failure-record test passed CI on `de529ce` (run `42538270662`) and on the read-lock harness at `8d47569` (run `42548111248`); run `42553905101` later timed out before observing rollback because the 5M-row fixture CTE had not completed within 45 seconds. The fixture CTE was reduced to 1M rows and passed all three CI jobs on `894d984` (run `42555474213`), but run `42560317968` subsequently failed the same test after observing rollback and before capturing failed-run persistence. The sentinel-before-slow-CTE correction passed six focused local runs, the full local gate, and workspace tests on Rust 1.89.0; commit `6d613c2` passed all three CI jobs in run `42562827192`. This verifies the corrected #11 harness on that SHA, not the complete G11 matrix or security review; see `recovery-drills.md`. The 2026-11-08 local regression verifies `SQLITE_OPEN_NOFOLLOW` rejects a final-component database symlink swapped after config validation in both read-only and mutable opens; ancestor-directory and migration-file races are outside that assertion. No external server required. |
 | PostgreSQL | 16.15, 17.11, 18.6 | CLI and adapter integration, metadata v3/v4 inspection and explicit v3→v5/v4→v5 upgrades, session locks, transactional migrations, supported concurrent-index reconciliation, and runner interactions. Focused recovery tests passed on 16.15 and 18.6; the 2026-11-08 supplemental 17.11 run passed 12 library/engine and 5 CLI tests, plus the complete 45-test ignored workspace suite paired with MySQL 8.4.13/MariaDB 11.8.9 (PgBouncer and three TLS tests excluded). The project owner selected current stable 18.6 as the required G11 line for scenario #11; 17.11 evidence is supplemental, not a new requirement. PostgreSQL #12 engine-level source revalidation is verified on all three listed versions. The configured-CA TLS test passed on 16.15. The PgBouncer 1.26.0 transaction-pooling backend-switch rejection test passed twice each on 16.15 and 18.6; it used a test-only Debian Bookworm base override and does not validate the repo's default Trixie image. The complete fault matrix remains pending. |
 | MySQL | 8.4.11; 8.4.13 and 9.7.4 (focused recovery drills only) | 8.4.11: non-transactional migration journey, per-statement journal, locks, partial failure, process interruption, explicit reconciliation, and metadata upgrades. Eight opt-in G11 recovery/metadata journeys passed twice on each of 8.4.11, 8.4.13, and 9.7.4; the full 45-test ignored suite passed across these versions in four PostgreSQL/MySQL/MariaDB combinations. TLS CA/hostname validation passed on 8.4.13. Other focused recovery evidence is listed in `recovery-drills.md`. |
-| MariaDB | 10.11.14, 11.4.13, 11.8.2; 11.8.9 and 13.0.2 (focused recovery drills only) | On 2026-11-08, each of 10.11.14 and 11.4.13 passed two independent clean loopback passes, each with 9 non-TLS CLI recovery/metadata tests, 2 adapter metadata/import tests, 1 engine source-revalidation test, 1 DSL Up/Down test, and 1 SQLx legacy-import test. TLS CA/hostname validation also passed once per version. The full 45-test ignored workspace suite passed once on each version paired with PostgreSQL 18.6 and MySQL 8.4.13; PgBouncer and three TLS tests were excluded, with MariaDB TLS verified separately. Eight opt-in G11 recovery/metadata journeys passed twice on each of 11.8.2, 11.8.9, and 13.0.2; the full 45-test ignored suite passed across these versions in four PostgreSQL/MySQL/MariaDB combinations, and two direct adapter tests also passed on 11.8.2 and 13.0.2. TLS CA/hostname validation passed on 11.8.9. Other focused recovery evidence is listed in `recovery-drills.md`. |
+| MariaDB | 10.11.14, 10.11.19, 11.4.13, 11.8.2; 11.8.9 and 13.0.2 (focused recovery drills only) | On 2026-11-08, each of 10.11.14 and 11.4.13 passed two independent clean loopback passes, each with 9 non-TLS CLI recovery/metadata tests, 2 adapter metadata/import tests, 1 engine source-revalidation test, 1 DSL Up/Down test, and 1 SQLx legacy-import test. TLS CA/hostname validation also passed once per version. The full 45-test ignored workspace suite passed once on each version paired with PostgreSQL 18.6 and MySQL 8.4.13; PgBouncer and three TLS tests were excluded, with MariaDB TLS verified separately. Eight opt-in G11 recovery/metadata journeys passed twice on each of 11.8.2, 11.8.9, and 13.0.2; the full 45-test ignored suite passed across these versions in four PostgreSQL/MySQL/MariaDB combinations, and two direct adapter tests also passed on 11.8.2 and 13.0.2. TLS CA/hostname validation passed on 11.8.9. Other focused recovery evidence is listed in `recovery-drills.md`. |
 
 MySQL/MariaDB migrations must declare `transaction = never`; their DDL can
 commit implicitly. PostgreSQL and SQLite support transactional migrations.
@@ -35,8 +38,8 @@ matrix or security review.
 | Area | Declared/current evidence | Qualification |
 |---|---|---|
 | Rust | `rust-version = 1.89`; development and CI toolchain 1.99.1; `cargo +1.89.0 test --workspace --all-features --locked` passed on 2026-11-08 | Full workspace tests are verified on the declared MSRV; the complete format/Clippy/build/examples/supply-chain gate is recorded on 1.99.1, not 1.89. |
-| Operating system | GitHub CI uses `ubuntu-latest`; local work is Linux x86_64 | macOS and Windows builds/tests are not verified by the current CI. |
-| Optional AI | `ai` Cargo feature; optional `cap-std`/`cap-fs-ext` 4.0.3; fake HTTP/provider tests; Unix regression tests reject final and intermediate symlinks swapped after path canonicalization | Local Linux tests only; no real AI provider was called. Provider behavior, availability, output quality, and macOS/Windows filesystem behavior are not certified. Under the aggressive post-fix path-race reproduction all 160 previews failed closed, so it established no successful-preview rate under contention. |
+| Operating system | Release 1.0.0: GitHub CI `ubuntu-latest`, local work Linux x86_64. On 2026-11-15, commit `96ff75eff5e698719eb3abefb0158ba2287cfdd9`, push run `43743366222`, job `quality-platforms` passed on `macos-latest` (image `macos-26-arm64`) and `windows-latest` (image `windows-2025`). Each runner ran `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, `cargo test --workspace --all-features --locked`, `cargo build --workspace --all-features --locked`, and examples `sqlite_embedded_migration` and `sqlite_schema_dsl`. On 2026-11-16, commit `d87979a6ce00c3e0f50f6e71afd0530fbaab9e8f`, push run `43800479891`, job `server-fault-macos` passed on `macos-latest` (image `macos26 20261102.0473.1`, macOS 26.7.2, Darwin 25.6.0 arm64). | The 2026-11-15 platform job had no database service and no server URL. macOS reported 162 passed and 49 ignored. Windows reported 152 passed and 49 ignored; ten Unix-only tests are not compiled on Windows. The 2026-11-16 macOS job ran `cargo test --workspace --all-features --locked -- --ignored --skip pgbouncer --skip _tls_ --test-threads=1` against Homebrew PostgreSQL 18.6, MySQL 8.4.13, and MariaDB 11.8.9 on `127.0.0.1`. It passed 45 tests and failed 0: 16 library/engine, 23 CLI, 3 DSL, and 3 legacy-import. PgBouncer, the three TLS tests, the parallel suite, and older patch lines were not run. Windows servers remain unverified. This row does not replace the 1.0.0 Linux x86_64 release evidence. |
+| Optional AI | `ai` Cargo feature; optional `cap-std`/`cap-fs-ext` 4.0.3; fake HTTP/provider tests; Unix regression tests reject final and intermediate symlinks swapped after path canonicalization | The 2026-11-15 platform job ran the all-features suite, including the AI tests, on macOS and Windows. The Unix symlink regressions run on macOS and are not compiled on Windows. No real AI provider was called. Provider behavior, availability, and output quality are not certified. Under the aggressive post-fix path-race reproduction all 160 previews failed closed, so it established no successful-preview rate under contention. |
 | Fuzzing | Scanner/parser targets and seed corpus are under `fuzz/`; both targets completed bounded runs on 2026-11-07 with retained generated corpora | Nightly Rust and `cargo-fuzz` were used in a rootless, network-disabled sandbox. `sql_scanner`: 2,309,020 executions; `migration_parser`: 2,404,475; 301 seconds each with configured 300-second limit. No crash artifacts were reported. This is bounded evidence, not proof of correctness; details and retained-corpus manifest are in `supply-chain.md`. |
 
 The server matrix is limited to the exact versions above and the behaviors
@@ -53,3 +56,55 @@ PgBouncer and three TLS tests were excluded. Both fuzz targets then completed
 Details are in `security-revalidation-2026-11-13.md`. Older patch lines were
 not repeated on this commit. MariaDB 12.3 remains unexercised. The
 default-parallel suite remains unverified.
+
+**macOS server fault matrix — 2026-11-16:** on
+`d87979a6ce00c3e0f50f6e71afd0530fbaab9e8f`, push run `43800479891`, the same
+45-test ignored selection passed once, serially, on `macos-latest` arm64
+against Homebrew PostgreSQL 18.6, MySQL 8.4.13, and MariaDB 11.8.9. The
+result was again 16 library/engine, 23 CLI, 3 DSL, and 3 legacy-import
+tests, with zero failures. PgBouncer, three TLS tests, the parallel suite,
+older patch lines, and MariaDB 12.3 were not run. Windows servers were not
+part of this job. The 2026-11-13 Linux x86_64 revalidation above is
+unchanged.
+
+**macOS server version cells — 2026-11-16:** on
+`e9880fc84ce0a0cd1d69f4e9d6ce9fc8ec18554f`, push run `43821443295`, the same
+45-test ignored selection passed once, serially, on each of four `macos-latest`
+arm64 cells. The host was macOS 26.7.2, Darwin 25.6.0, build 25G332. Three
+cells used image `macos26 20261102.0473.1`. The PostgreSQL 17 cell used image
+`macos26 20261112.0504.1`. Printed versions were PostgreSQL 16.15 with MySQL
+8.4.13 and MariaDB 10.11.19; PostgreSQL 17.11 with MySQL 8.4.13 and MariaDB
+11.4.13; PostgreSQL 18.6 with MySQL 8.4.13 and MariaDB 11.8.9; and PostgreSQL
+18.6 with MySQL 9.7.4 and MariaDB 13.0.2. Each cell passed 16 library/engine,
+23 CLI, 3 DSL, and 3 legacy-import tests, with zero failures. The command was
+`cargo test --workspace --all-features --locked -- --ignored --skip pgbouncer
+--skip _tls_ --test-threads=1`. MySQL 8.0, MariaDB 12.3, PgBouncer, the three
+TLS tests, the parallel suite, and Windows servers were not run. This job does
+not replace the Linux 1.0.0 evidence and does not add Windows server support.
+
+**Server lines, Windows servers, pool, and TLS — 2026-11-16:** on
+`3c3e18f0e04887561ff6ee907575ac3d8cb9dd49`, push run `43843629998`, five
+`macos-latest` arm64 cells each passed the same 45-test ignored selection
+once, serially. The host was macOS 26.7.2, Darwin 25.6.0, build 25G332, and
+every cell used image `macos26 20261102.0473.1`. Printed versions were
+PostgreSQL 16.15 with MySQL 8.4.13 and MariaDB 10.11.19; PostgreSQL 17.11
+with MySQL 8.4.13 and MariaDB 11.4.13; PostgreSQL 18.6 with MySQL 8.4.13 and
+MariaDB 11.8.9; PostgreSQL 18.6 with MySQL 9.7.4 and MariaDB 13.0.2; and
+PostgreSQL 18.6 with MySQL 8.0.46 and MariaDB 12.3.3. Each cell passed 16
+library/engine, 23 CLI, 3 DSL, and 3 legacy-import tests, with zero
+failures. The command was `cargo test --workspace --all-features --locked --
+--ignored --skip pgbouncer --skip _tls_ --test-threads=1`. The same push ran
+that selection on Windows Server 2025 against PostgreSQL 18.6, MySQL 8.4.13,
+and MariaDB 11.8.9, again 45 passed and 0 failed. On Ubuntu the parallel
+ignored suite, skipping PgBouncer and TLS and without `--test-threads=1`,
+passed the same 45 tests against PostgreSQL 18.7 (Debian 18.7-1.pgdg13+2),
+MySQL 8.4.13, and MariaDB 11.8.9-MariaDB-ubu2404. PgBouncer 1.22.0-1build4
+passed
+`local_pgbouncer_backend_change_is_rejected_after_session_lock_acquisition`.
+The TLS run passed `mysql_tls_validates_the_configured_ca_and_hostname`,
+`mariadb_tls_validates_the_configured_ca_and_hostname`, and
+`local_postgres_tls_connection_validates_a_configured_ca`. Debian PostgreSQL
+18.7 does not replace the Homebrew 18.6 broad-suite line. MySQL 9.7.4 and
+MariaDB 13.0.2 were exercised again as a full ignored cell; the
+recovery-drill wording above stays as written. This job does not replace the
+Linux 1.0.0 evidence.

@@ -20,7 +20,18 @@ Upgrades are in [docs/upgrade-guide.md](docs/upgrade-guide.md).
 PostgreSQL 18.6, MySQL 8.4.13, and MariaDB 11.8.9 were revalidated together
 on 2026-11-13. MySQL 8.4 is the current LTS line with the broad suite.
 MariaDB 11.8 is the newest line with that same suite. MariaDB 12.3 has not
-been run. macOS and Windows are not part of this release.
+been run. Release 1.0.0 remains Linux x86_64. Current CI also runs the SQLite
+suite on macOS and Windows; the support matrix records the limit.
+
+On 2026-11-16, push run `43843629998` ran that ignored suite on five macOS
+cells, including MySQL 8.0.46 with MariaDB 12.3.3, and again on MySQL 9.7.4
+with MariaDB 13.0.2. The same push ran it on Windows Server 2025 against
+PostgreSQL 18.6, MySQL 8.4.13, and MariaDB 11.8.9. On Linux it ran the
+parallel ignored suite, PgBouncer 1.22.0, and the three TLS tests against
+PostgreSQL 18.7 (Debian 18.7-1.pgdg13+2), MySQL 8.4.13, and MariaDB 11.8.9.
+That Debian 18.7 line does not replace PostgreSQL 18.6 in the table above.
+Release 1.1.0 keeps the 1.0.0 API. It is not on crates.io. The support matrix
+records the limits.
 
 ## Quick start
 
@@ -111,6 +122,8 @@ allow_insecure_transport = true
 |---|---|
 | `plan` | Read-only. Prints `Plan <hash>` and `Target <fingerprint>`. |
 | `plan --down --steps N` | Prints the rollback hash for that step count. |
+| `chain` | Replays each published SQLite schema, then the pending up SQL, on a disposable file. Does not open the configured database. |
+| `chain record <name> --through <version>` | Records that published schema. Refuses to overwrite. |
 | `up` / `down` | Apply or roll back. Development and test need no extra flags. |
 | `status`, `history`, `doctor` | Read-only. |
 | `doctor reconcile` | Records an operator decision. It does not execute SQL. |
@@ -135,7 +148,28 @@ with one entry per statement: `step_index`, `statement_hash`, `state`
 (`confirmed_applied`, `confirmed_not_applied`, or `indeterminate`), and
 `inspection`. An indeterminate step blocks reconciliation.
 
+## Phone chain
+
+Phone SQL stays in its own SQLite project. Server SQL does not go in that
+directory. `published/<name>.txt`, next to `dbm.toml`, lists the versions that
+already shipped and the `sha256:raw:v1` checksum of each up section. That
+checksum is not the migration file checksum. `dbm chain` replays every
+published file on a new SQLite file and then applies the pending up SQL. It
+does not open the configured database and it does not run down SQL. An empty
+`published/` directory means nothing has shipped; the fresh chain still runs.
+
+```sh
+dbm chain record store-1.0 --through 20261115000000000001
+dbm chain
+```
+
 ## Library, runner, and AI
+
+The default features are the 1.0 contract: SQLite, PostgreSQL, MySQL and
+MariaDB, the `dbm` binary, the runner, legacy import, and the DSL. Every
+build keeps Tokio. `default-features = false` with `sqlite` is an opt-in
+embed. It leaves out the server drivers and `clap`, and it still links
+Tokio. See [docs/embed.md](docs/embed.md).
 
 `database_migrator::dsl` and `MigrationRegistry` are experimental. See
 `examples/sqlite_schema_dsl.rs` and `examples/sqlite_embedded_migration.rs`.
@@ -173,6 +207,10 @@ disposable loopback database.
 bundled SQLite, `postgres:18.6`, and `mariadb:11.8.9`. Compose publishes both
 servers on `127.0.0.1` only. MySQL is not in that example. The configs use
 `development`.
+
+[examples/local-ledger](examples/local-ledger/README.md) is the phone expense
+ledger. `phone/` holds the up SQL. `dbm chain` replays those bytes and does
+not open `ledger.sqlite`.
 
 ## License
 

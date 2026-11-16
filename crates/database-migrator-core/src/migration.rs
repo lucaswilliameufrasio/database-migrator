@@ -77,7 +77,7 @@ pub fn split_sql_statements_for_dialect(sql: &str, dialect: SqlDialect) -> Vec<&
     }
 }
 
-pub(crate) fn validate_mysql_migration_statement(sql: &str) -> Result<()> {
+pub fn validate_mysql_migration_statement(sql: &str) -> Result<()> {
     let tokens = mysql_identifier_tokens(sql);
     let Some(first) = tokens.first().map(|token| token.value.as_str()) else {
         return Err(DbmError::Safety(
@@ -158,7 +158,7 @@ pub(crate) fn validate_mysql_migration_statement(sql: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn validate_postgres_migration_statement(sql: &str) -> Result<()> {
+pub fn validate_postgres_migration_statement(sql: &str) -> Result<()> {
     let tokens = postgres_identifier_tokens(sql)?;
     let Some(first) = tokens.first().map(|token| token.value.as_str()) else {
         return Err(DbmError::Safety(
@@ -237,12 +237,12 @@ pub(crate) fn validate_postgres_migration_statement(sql: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn validate_postgres_nontransactional_statement(sql: &str) -> Result<()> {
+pub fn validate_postgres_nontransactional_statement(sql: &str) -> Result<()> {
     parse_postgres_nontransactional_index_operation(sql).map(|_| ())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum PostgresNonTransactionalIndexOperation {
+pub enum PostgresNonTransactionalIndexOperation {
     Create {
         index_name: String,
         table_name: String,
@@ -254,7 +254,7 @@ pub(crate) enum PostgresNonTransactionalIndexOperation {
     },
 }
 
-pub(crate) fn parse_postgres_nontransactional_index_operation(
+pub fn parse_postgres_nontransactional_index_operation(
     sql: &str,
 ) -> Result<PostgresNonTransactionalIndexOperation> {
     validate_postgres_migration_statement(sql)?;

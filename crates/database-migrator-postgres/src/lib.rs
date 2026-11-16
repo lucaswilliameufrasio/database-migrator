@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::io::Read;
 use std::net::IpAddr;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use rustls::RootCertStore;
@@ -12,25 +13,27 @@ use tokio_postgres::config::{Host, SslMode};
 use tokio_postgres::{Client, Config as PostgresConfig, NoTls};
 use tokio_postgres_rustls::MakeRustlsConnect;
 
-use crate::async_runtime::run_blocking;
-use crate::config::{Environment, LoadedConfig};
-use crate::error::{DbmError, Result};
-use crate::identity::legacy_migration_key;
-use crate::legacy::{
+use database_migrator_core::async_runtime::run_blocking;
+use database_migrator_core::config::{Environment, LoadedConfig};
+use database_migrator_core::error::{DbmError, Result};
+use database_migrator_core::identity::legacy_migration_key;
+use database_migrator_core::legacy::{
     GooseRow, KnexLock, KnexRow, LegacyAdoptionWrite, LegacyImportSnapshot, LegacyImportWrite,
     LegacyTool, SqlxRow, inspect_goose, inspect_knex, inspect_sqlx, parse_legacy_bool,
 };
-use crate::migration::{
+use database_migrator_core::migration::{
     MigrationKind, PostgresNonTransactionalIndexOperation,
     parse_postgres_nontransactional_index_operation,
 };
-use crate::storage::{
+use database_migrator_core::storage::{
     AppliedMigration, FinishedRunData, LegacyAppliedMigration, LegacyImportEventRecord,
     LegacyImportRecord, LockData, LockRecord, MetadataSnapshot, PlannedRunData, ReconciliationData,
     RunRecord, StepData, StepRecord,
 };
 
-use super::{BoxFuture, DatabaseAdapter, DatabaseInfo, DatabaseSession, SessionIntent};
+use database_migrator_core::database::{
+    BoxFuture, DatabaseAdapter, DatabaseInfo, DatabaseSession, SessionIntent,
+};
 
 const METADATA_TABLE_COUNT_QUERY: &str = "SELECT count(*)::bigint, \
     count(*) FILTER (WHERE tables.relkind IN ('r', 'p'))::bigint \
@@ -188,7 +191,7 @@ CREATE TABLE schema_migration_locks (
 );
 "#;
 
-pub(crate) struct PostgresAdapter;
+pub struct PostgresAdapter;
 
 pub(crate) fn advisory_lock_key(info: &DatabaseInfo) -> Result<i64> {
     let database = info.database.as_deref().ok_or_else(|| DbmError::Driver {
@@ -213,6 +216,52 @@ pub(crate) fn advisory_lock_key(info: &DatabaseInfo) -> Result<i64> {
     Ok(i64::from_be_bytes(key_bytes))
 }
 
+static TEST_CONNECTION_URLS: LazyLock<Mutex<HashMap<String, String>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Selects the connection string for one `url_env` name.
+///
+/// Tests that need a private database install an override here. The crate
+/// forbids unsafe code, so a test cannot publish that URL with
+/// `std::env::set_var`, and rewriting the shared `DBM_TEST_DATABASE_URL`
+/// would race other tests in the same process.
+#[doc(hidden)]
+pub fn install_test_connection_url(variable_name: &str, url: &str) {
+    let mut urls = TEST_CONNECTION_URLS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    urls.insert(variable_name.to_owned(), url.to_owned());
+}
+
+/// Drops a connection override installed for a test.
+#[doc(hidden)]
+pub fn remove_test_connection_url(variable_name: &str) {
+    let mut urls = TEST_CONNECTION_URLS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    urls.remove(variable_name);
+}
+
+fn configured_connection_string(variable_name: &str) -> Result<String> {
+    let urls = TEST_CONNECTION_URLS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(url) = urls.get(variable_name) {
+        return Ok(url.clone());
+    }
+    drop(urls);
+    std::env::var(variable_name).map_err(|error| {
+        DbmError::Configuration(match error {
+            std::env::VarError::NotPresent => {
+                format!("PostgreSQL connection variable {variable_name} is not set")
+            }
+            std::env::VarError::NotUnicode(_) => {
+                format!("PostgreSQL connection variable {variable_name} is not valid Unicode")
+            }
+        })
+    })
+}
+
 impl DatabaseAdapter for PostgresAdapter {
     fn connect<'a>(
         &'a self,
@@ -223,16 +272,7 @@ impl DatabaseAdapter for PostgresAdapter {
             let variable_name = config.config.target.url_env.as_deref().ok_or_else(|| {
                 DbmError::Configuration("PostgreSQL target has no url_env".to_owned())
             })?;
-            let connection_string = std::env::var(variable_name).map_err(|error| {
-                DbmError::Configuration(match error {
-                    std::env::VarError::NotPresent => {
-                        format!("PostgreSQL connection variable {variable_name} is not set")
-                    }
-                    std::env::VarError::NotUnicode(_) => format!(
-                        "PostgreSQL connection variable {variable_name} is not valid Unicode"
-                    ),
-                })
-            })?;
+            let connection_string = configured_connection_string(variable_name)?;
             let (mut postgres_config, use_tls) = prepare_connection_config(
                 &connection_string,
                 config.config.target.allow_insecure_transport,
@@ -427,9 +467,9 @@ impl PostgresSession {
             .map_err(|_| metadata_row_error("metadata installation id"))?;
         if !matches!(
             format_version,
-            crate::storage::THIRD_PREVIOUS_METADATA_FORMAT_VERSION
-                | crate::storage::PREVIOUS_METADATA_FORMAT_VERSION
-                | crate::storage::METADATA_FORMAT_VERSION
+            database_migrator_core::storage::THIRD_PREVIOUS_METADATA_FORMAT_VERSION
+                | database_migrator_core::storage::PREVIOUS_METADATA_FORMAT_VERSION
+                | database_migrator_core::storage::METADATA_FORMAT_VERSION
         ) || installation_id.is_empty()
         {
             return Err(DbmError::Diverged(format!(
@@ -437,7 +477,9 @@ impl PostgresSession {
             )));
         }
 
-        let applied_query = if format_version >= crate::storage::METADATA_FORMAT_VERSION {
+        let applied_query = if format_version
+            >= database_migrator_core::storage::METADATA_FORMAT_VERSION
+        {
             "SELECT migration_key, kind, COALESCE(repeatable_name, native_version)::text, \
                     filename, source_path, description, content_checksum, apply_order::bigint, applied_at::text \
              FROM schema_migrations WHERE namespace = $1 AND kind IN ('versioned', 'repeatable') \
@@ -486,7 +528,7 @@ impl PostgresSession {
         }
 
         let (legacy_applied, legacy_imports, legacy_import_events) = if format_version
-            >= crate::storage::PREVIOUS_METADATA_FORMAT_VERSION
+            >= database_migrator_core::storage::PREVIOUS_METADATA_FORMAT_VERSION
         {
             let legacy_rows = client
                 .query(
@@ -861,10 +903,9 @@ impl PostgresSession {
             )));
         }
         let snapshot = self.read_initialized_snapshot(namespace).await?;
-        let expected_count = if snapshot
-            .metadata_format_version
-            .is_some_and(|version| version >= crate::storage::PREVIOUS_METADATA_FORMAT_VERSION)
-        {
+        let expected_count = if snapshot.metadata_format_version.is_some_and(|version| {
+            version >= database_migrator_core::storage::PREVIOUS_METADATA_FORMAT_VERSION
+        }) {
             8
         } else {
             5
@@ -1124,7 +1165,7 @@ impl PostgresSession {
                 &[
                     &import.import_id,
                     &import.namespace,
-                    &crate::legacy::tool_name(import.tool),
+                    &database_migrator_core::legacy::tool_name(import.tool),
                     &source.source_identity,
                     &source.digest,
                     &import.plan_digest,
@@ -1159,7 +1200,7 @@ impl PostgresSession {
                         &event_index,
                         &event.event_id,
                         &event.original_version,
-                        &crate::legacy::event_state_name(event.state),
+                        &database_migrator_core::legacy::event_state_name(event.state),
                         &event.filename,
                         &event.batch_id,
                         &event.applied_at,
@@ -1177,7 +1218,7 @@ impl PostgresSession {
         for (position, migration) in source.current_migrations.iter().enumerate() {
             let migration_key = legacy_migration_key(
                 import.namespace,
-                crate::legacy::tool_name(import.tool),
+                database_migrator_core::legacy::tool_name(import.tool),
                 &source.source_identity,
                 &migration.original_identity,
             );
@@ -1192,8 +1233,9 @@ impl PostgresSession {
                 .checksum
                 .as_ref()
                 .map(|checksum| checksum.value.as_str());
-            let verification_status =
-                crate::legacy::verification_status_name(migration.verification_status);
+            let verification_status = database_migrator_core::legacy::verification_status_name(
+                migration.verification_status,
+            );
             self.client()?
                 .execute(
                     "INSERT INTO schema_migrations \
@@ -1211,7 +1253,7 @@ impl PostgresSession {
                         &migration.original_version,
                         &migration.filename,
                         &migration.filename,
-                        &crate::legacy::tool_name(import.tool),
+                        &database_migrator_core::legacy::tool_name(import.tool),
                         &source.source_identity,
                         &migration.original_identity,
                         &import.import_id,
@@ -1315,7 +1357,8 @@ impl PostgresSession {
                 .read_initialized_snapshot("__dbm_metadata_probe__")
                 .await?;
             if relation_count != 8
-                || snapshot.metadata_format_version != Some(crate::storage::METADATA_FORMAT_VERSION)
+                || snapshot.metadata_format_version
+                    != Some(database_migrator_core::storage::METADATA_FORMAT_VERSION)
             {
                 return Err(DbmError::Safety(
                     "existing PostgreSQL metadata requires an explicit metadata upgrade before migration writes"
@@ -1336,10 +1379,12 @@ impl PostgresSession {
             .map_err(|error| {
                 Self::classify_statement_error(error, "creating PostgreSQL metadata")
             })?;
-        let metadata_version =
-            i32::try_from(crate::storage::METADATA_FORMAT_VERSION).map_err(|_| {
-                DbmError::Diverged("metadata format version exceeds PostgreSQL INTEGER".to_owned())
-            })?;
+        let metadata_version = i32::try_from(
+            database_migrator_core::storage::METADATA_FORMAT_VERSION,
+        )
+        .map_err(|_| {
+            DbmError::Diverged("metadata format version exceeds PostgreSQL INTEGER".to_owned())
+        })?;
         let installation_id = uuid::Uuid::new_v4().simple().to_string();
         self.client()?
             .execute(
@@ -1547,8 +1592,8 @@ impl DatabaseSession for PostgresSession {
                 .map_err(|_| metadata_row_error("metadata installation id"))?;
             if !matches!(
                 version,
-                crate::storage::THIRD_PREVIOUS_METADATA_FORMAT_VERSION
-                    | crate::storage::PREVIOUS_METADATA_FORMAT_VERSION
+                database_migrator_core::storage::THIRD_PREVIOUS_METADATA_FORMAT_VERSION
+                    | database_migrator_core::storage::PREVIOUS_METADATA_FORMAT_VERSION
             ) || installation_id.is_empty()
             {
                 return Err(DbmError::Diverged(format!(
@@ -1569,19 +1614,20 @@ impl DatabaseSession for PostgresSession {
             let table_count: i64 = counts
                 .try_get(1)
                 .map_err(|_| metadata_row_error("metadata table count"))?;
-            let expected_count =
-                if version == crate::storage::THIRD_PREVIOUS_METADATA_FORMAT_VERSION {
-                    5
-                } else {
-                    8
-                };
+            let expected_count = if version
+                == database_migrator_core::storage::THIRD_PREVIOUS_METADATA_FORMAT_VERSION
+            {
+                5
+            } else {
+                8
+            };
             if (relation_count, table_count) != (expected_count, expected_count) {
                 return Err(DbmError::Diverged(format!(
                     "PostgreSQL format {version} upgrade requires exactly {expected_count} intact metadata tables; found {table_count} tables among {relation_count} reserved objects"
                 )));
             }
 
-            if version == crate::storage::THIRD_PREVIOUS_METADATA_FORMAT_VERSION {
+            if version == database_migrator_core::storage::THIRD_PREVIOUS_METADATA_FORMAT_VERSION {
                 self.client()?
                     .batch_execute(POSTGRES_METADATA_V3_TO_V4_DDL)
                     .await
@@ -1645,7 +1691,7 @@ impl DatabaseSession for PostgresSession {
 
     fn insert_planned_run<'a>(
         &'a mut self,
-        migration: &'a crate::migration::Migration,
+        migration: &'a database_migrator_core::migration::Migration,
         run: PlannedRunData<'a>,
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -2115,7 +2161,7 @@ impl DatabaseSession for PostgresSession {
 
     fn insert_applied<'a>(
         &'a mut self,
-        migration: &'a crate::migration::Migration,
+        migration: &'a database_migrator_core::migration::Migration,
         applied_at: &'a str,
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -2177,7 +2223,7 @@ impl DatabaseSession for PostgresSession {
 
     fn delete_applied<'a>(
         &'a mut self,
-        migration: &'a crate::migration::Migration,
+        migration: &'a database_migrator_core::migration::Migration,
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             self.ensure_metadata_transaction()?;
@@ -2694,6 +2740,7 @@ fn all_hosts_are_local(config: &PostgresConfig) -> bool {
                         .get(index)
                         .is_some_and(IpAddr::is_loopback)
             }
+            #[cfg(unix)]
             Host::Unix(_) => true,
         })
         && config.get_hostaddrs().iter().all(IpAddr::is_loopback)
@@ -2706,6 +2753,7 @@ fn postgres_target_identity(config: &PostgresConfig) -> String {
         let port = ports.get(index).copied().unwrap_or_default();
         let host = match host {
             Host::Tcp(host) => format!("tcp:{host}:{port}"),
+            #[cfg(unix)]
             Host::Unix(path) => format!("unix:{}:{port}", path.display()),
         };
         hosts.push(host);
@@ -2798,19 +2846,39 @@ mod tests {
     use tokio_postgres::config::Config as PostgresConfig;
 
     use super::{
-        PostgresAdapter, advisory_lock_key, all_hosts_are_local, parse_ca_certificates,
-        prepare_connection_config,
+        PostgresAdapter, advisory_lock_key, all_hosts_are_local, configured_connection_string,
+        install_test_connection_url, parse_ca_certificates, prepare_connection_config,
+        remove_test_connection_url,
     };
-    use crate::config::{self, Environment};
-    use crate::database::{DatabaseAdapter, DatabaseSession, SessionIntent};
-    use crate::error::DbmError;
-    use crate::identity::MigrationIdentity;
-    use crate::legacy::{LegacyImportWrite, LegacyTool};
-    use crate::migration::{
+    use database_migrator_core::config::{self, Environment};
+    use database_migrator_core::database::{DatabaseAdapter, DatabaseSession, SessionIntent};
+    use database_migrator_core::error::DbmError;
+    use database_migrator_core::identity::MigrationIdentity;
+    use database_migrator_core::legacy::{LegacyImportWrite, LegacyTool};
+    use database_migrator_core::migration::{
         Migration, MigrationFormat, MigrationKind, SqlDialect, TransactionPolicy,
     };
-    use crate::storage::{FinishedRunData, LockData, PlannedRunData, StepData};
+    use database_migrator_core::storage::{FinishedRunData, LockData, PlannedRunData, StepData};
     use tokio_postgres::config::SslMode;
+
+    #[test]
+    fn test_connection_url_override_replaces_one_variable_only() {
+        let variable_name = format!("DBM_TEST_DATABASE_URL_{}", uuid::Uuid::new_v4().simple());
+        let url = "postgres://dbm@127.0.0.1:5432/dbm_private?sslmode=disable";
+        install_test_connection_url(&variable_name, url);
+
+        let resolved = configured_connection_string(&variable_name)
+            .expect("installed override replaces the missing environment variable");
+        assert_eq!(resolved, url);
+        let untouched = configured_connection_string("DBM_TEST_DATABASE_URL_DOES_NOT_EXIST")
+            .expect_err("a different variable still comes from the environment");
+        assert!(matches!(untouched, DbmError::Configuration(_)));
+
+        remove_test_connection_url(&variable_name);
+        let removed = configured_connection_string(&variable_name)
+            .expect_err("removing the override restores environment lookup");
+        assert!(matches!(removed, DbmError::Configuration(_)));
+    }
 
     #[test]
     fn parses_all_ca_certificates_and_ignores_other_pem_sections() {
@@ -2882,7 +2950,10 @@ mod tests {
     fn local_postgres_config(
         allow_insecure_transport: bool,
         tls_ca_cert_env: Option<&str>,
-    ) -> (tempfile::TempDir, crate::config::LoadedConfig) {
+    ) -> (
+        tempfile::TempDir,
+        database_migrator_core::config::LoadedConfig,
+    ) {
         let connection_string = std::env::var("DBM_TEST_DATABASE_URL")
             .expect("DBM_TEST_DATABASE_URL must identify a disposable local PostgreSQL target");
         let parsed = connection_string
@@ -2924,7 +2995,7 @@ mod tests {
 
     async fn create_isolated_schema(
         adapter: &PostgresAdapter,
-        config: &crate::config::LoadedConfig,
+        config: &database_migrator_core::config::LoadedConfig,
     ) -> String {
         let schema = format!("dbm_test_{}", uuid::Uuid::new_v4().simple());
         let mut session = adapter
@@ -2949,7 +3020,7 @@ mod tests {
 
     async fn connect_in_schema(
         adapter: &PostgresAdapter,
-        config: &crate::config::LoadedConfig,
+        config: &database_migrator_core::config::LoadedConfig,
         schema: &str,
         intent: SessionIntent,
     ) -> Box<dyn DatabaseSession> {
@@ -2974,7 +3045,7 @@ mod tests {
 
     async fn drop_isolated_schema(
         adapter: &PostgresAdapter,
-        config: &crate::config::LoadedConfig,
+        config: &database_migrator_core::config::LoadedConfig,
         schema: &str,
     ) {
         let mut session = adapter
@@ -3795,7 +3866,7 @@ mod tests {
             .expect("read upgraded PostgreSQL metadata");
         assert_eq!(
             after.metadata_format_version,
-            Some(crate::storage::METADATA_FORMAT_VERSION)
+            Some(database_migrator_core::storage::METADATA_FORMAT_VERSION)
         );
         assert_eq!(after.applied.len(), 1);
         assert_eq!(after.runs.len(), 1);
@@ -3867,7 +3938,7 @@ mod tests {
             .expect("read direct v4-to-v5 upgrade result");
         assert_eq!(
             after_v4.metadata_format_version,
-            Some(crate::storage::METADATA_FORMAT_VERSION)
+            Some(database_migrator_core::storage::METADATA_FORMAT_VERSION)
         );
         assert_eq!(after_v4.applied.len(), 1);
         assert_eq!(after_v4.runs.len(), 1);
@@ -3889,7 +3960,25 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires DBM_TEST_DATABASE_URL for a disposable loopback PostgreSQL instance"]
     async fn local_postgres_v4_upgrade_failure_rolls_back_prior_ddl() {
-        let (_directory, config) = local_postgres_config(true, None);
+        let admin_url = std::env::var("DBM_TEST_DATABASE_URL")
+            .expect("DBM_TEST_DATABASE_URL must identify a disposable loopback target");
+        let private_name = format!("dbm_{}", uuid::Uuid::new_v4().simple());
+        let (admin, admin_connection) = tokio_postgres::connect(&admin_url, tokio_postgres::NoTls)
+            .await
+            .expect("connect to create a private PostgreSQL database");
+        let admin_task = tokio::spawn(admin_connection);
+        admin
+            .batch_execute(&format!("CREATE DATABASE {private_name}"))
+            .await
+            .expect("create a private PostgreSQL database for the upgrade fault");
+        drop(admin);
+        admin_task.abort();
+        let _ = admin_task.await;
+        let private_url = postgres_database_url(&admin_url, &private_name);
+        let variable_name = format!("DBM_TEST_DATABASE_URL_{private_name}");
+        install_test_connection_url(&variable_name, &private_url);
+        let (_directory, mut config) = local_postgres_config(true, None);
+        config.config.target.url_env = Some(variable_name.clone());
         let adapter = PostgresAdapter;
         let schema = create_isolated_schema(&adapter, &config).await;
         let mut session =
@@ -3984,10 +4073,8 @@ mod tests {
         assert_eq!(before.runs.len(), 1);
         assert_eq!(before.steps.len(), 1);
 
-        let database_url = std::env::var("DBM_TEST_DATABASE_URL")
-            .expect("DBM_TEST_DATABASE_URL remains configured for the test");
         let (observer, observer_connection) =
-            tokio_postgres::connect(&database_url, tokio_postgres::NoTls)
+            tokio_postgres::connect(&private_url, tokio_postgres::NoTls)
                 .await
                 .expect("connect to install PostgreSQL metadata-upgrade fault");
         let observer_task = tokio::spawn(observer_connection);
@@ -4077,7 +4164,33 @@ mod tests {
             .close()
             .await
             .expect("close PostgreSQL metadata-upgrade test session");
-        drop_isolated_schema(&adapter, &config, &schema).await;
+        remove_test_connection_url(&variable_name);
+        let (admin, admin_connection) = tokio_postgres::connect(&admin_url, tokio_postgres::NoTls)
+            .await
+            .expect("connect to drop the private PostgreSQL database");
+        let admin_task = tokio::spawn(admin_connection);
+        admin
+            .batch_execute(&format!("DROP DATABASE {private_name} WITH (FORCE)"))
+            .await
+            .expect("drop the private PostgreSQL database");
+        drop(admin);
+        admin_task.abort();
+        let _ = admin_task.await;
+    }
+
+    fn postgres_database_url(database_url: &str, database_name: &str) -> String {
+        let (without_query, query) = match database_url.split_once('?') {
+            Some((path, query)) => (path, Some(query)),
+            None => (database_url, None),
+        };
+        let (prefix, current_name) = without_query
+            .rsplit_once('/')
+            .expect("PostgreSQL URL includes a database name");
+        assert!(!current_name.is_empty() && !prefix.is_empty());
+        match query {
+            Some(query) => format!("{prefix}/{database_name}?{query}"),
+            None => format!("{prefix}/{database_name}"),
+        }
     }
 
     #[tokio::test]
@@ -4180,7 +4293,7 @@ mod tests {
             let snapshot = session.read_snapshot("default").await?;
             assert_eq!(
                 snapshot.metadata_format_version,
-                Some(crate::storage::METADATA_FORMAT_VERSION)
+                Some(database_migrator_core::storage::METADATA_FORMAT_VERSION)
             );
             assert_eq!(snapshot.legacy_imports.len(), 3);
             assert_eq!(snapshot.legacy_import_events.len(), 7);

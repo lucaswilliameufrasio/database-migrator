@@ -271,6 +271,11 @@ fn start_mysql_query_hold_proxy(connection_url: &str, query_fragment: &str) -> M
                 client
                     .set_nodelay(true)
                     .map_err(|error| format!("configure MySQL proxy client: {error}"))?;
+                // macOS accept keeps the listener nonblocking. Linux returns a
+                // blocking socket. The packet loop reads until the target DDL.
+                client
+                    .set_nonblocking(false)
+                    .map_err(|error| format!("make MySQL proxy client blocking: {error}"))?;
                 let mut server = TcpStream::connect(target_address)
                     .map_err(|error| format!("connect proxy to disposable MySQL: {error}"))?;
                 server
@@ -877,8 +882,8 @@ fn run_mysql_cli_journey(environment_variable: &str, expected_vendor: &str) {
         );
     } else {
         assert!(
-            !is_mariadb && (version.starts_with("8.4.") || version.starts_with("9.7.")),
-            "the configured integration server is not MySQL 8.4 or 9.7"
+            !is_mariadb && is_tested_mysql_line(&version),
+            "the configured integration server is not a tested MySQL line"
         );
     }
     let database = format!("dbm_f5_{}", uuid::Uuid::new_v4().simple());
@@ -1410,7 +1415,7 @@ fn run_mysql_cli_contention_journey(environment_variable: &str, expected_vendor:
         assert!(is_mariadb, "configured target is not MariaDB");
     } else {
         assert!(
-            !is_mariadb && (version.starts_with("8.4.") || version.starts_with("9.7.")),
+            !is_mariadb && is_tested_mysql_line(&version),
             "configured target is not a supported test MySQL line"
         );
     }
@@ -1447,70 +1452,46 @@ fn run_mysql_cli_contention_journey(environment_variable: &str, expected_vendor:
             .path()
             .join(format!("migrations/versioned/{version}_same_namespace.sql")),
         format!(
-            "-- dbm:dialect mysql\n-- dbm:transaction never\n-- dbm:up\nSELECT SLEEP(5);\nCREATE TABLE {probe_table} (id BIGINT PRIMARY KEY);\n-- dbm:down\nDROP TABLE {probe_table};\n"
+            "-- dbm:dialect mysql\n-- dbm:transaction never\n-- dbm:up\nCREATE TABLE {probe_table} (id BIGINT PRIMARY KEY);\n-- dbm:down\nDROP TABLE {probe_table};\n"
         ),
     )
     .expect("write same-namespace MySQL/MariaDB contention migration");
 
+    // The proxy holds the user statement before the server executes it. The
+    // named lock is acquired earlier on that same session. Polling
+    // information_schema.processlist is not used: the observer query contains
+    // the marker it searches for, so it can count itself.
+    let proxy = start_mysql_query_hold_proxy(&target_url, &probe_table);
     let mut first = Command::new(env!("CARGO_BIN_EXE_dbm"))
         .current_dir(directory.path())
         .args(["--format", "json", "up"])
-        .env(environment_variable, &target_url)
+        .env(environment_variable, &proxy.url)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("start first MySQL/MariaDB migration CLI");
-    let active_deadline = Instant::now() + Duration::from_secs(15);
-    let mut first_is_sleeping = false;
-    while Instant::now() < active_deadline {
-        let journal_table_count = mysql_scalar(
-            &base_url,
-            &database,
-            "SELECT COUNT(*) FROM information_schema.tables \
-             WHERE table_schema = DATABASE() \
-               AND table_name IN ('schema_migration_runs', 'schema_migration_steps')",
-        );
-        if journal_table_count == Ok(2) {
-            let intent_count = mysql_scalar(
-                &base_url,
-                &database,
-                &format!(
-                    "SELECT COUNT(*) FROM schema_migration_steps AS step \
-                     INNER JOIN schema_migration_runs AS run USING (run_id) \
-                     WHERE run.namespace = '{namespace}' \
-                       AND run.migration_version = '{version}' \
-                       AND run.state = 'started' AND step.state = 'intent_recorded'"
-                ),
-            )
-            .unwrap_or(0);
-            let sleeping_session = mysql_scalar(
-                &base_url,
-                &database,
-                "SELECT COUNT(*) FROM information_schema.processlist \
-                 WHERE DB = DATABASE() AND INFO LIKE '%SELECT SLEEP(5)%'",
-            )
-            .unwrap_or(0);
-            if intent_count == 1 && sleeping_session == 1 {
-                first_is_sleeping = true;
-                break;
-            }
-        }
-        if !matches!(first.try_wait(), Ok(None)) {
-            break;
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-
-    if !first_is_sleeping {
+    let notification = proxy.notification.recv_timeout(Duration::from_secs(15));
+    let statement_held = matches!(&notification, Ok(Ok(())));
+    if !statement_held {
         let _ = first.kill();
         let output = first
             .wait_with_output()
             .expect("reap first MySQL CLI after failed contention setup");
+        let _ = proxy.control.send(MysqlProxyControl::Stop);
+        let proxy_result = proxy
+            .thread
+            .join()
+            .expect("MySQL contention proxy thread did not panic");
         database_cleanup
             .clean()
             .expect("remove isolated database after failed contention setup");
+        let notification_detail = match notification {
+            Ok(Ok(())) => "held target SQL".to_owned(),
+            Ok(Err(error)) => error,
+            Err(error) => format!("no target statement notification: {error}"),
+        };
         panic!(
-            "first CLI did not reach its sleeping statement; stdout={}, stderr={}",
+            "first CLI did not reach its held statement ({notification_detail}); stdout={}, stderr={}, proxy={proxy_result:?}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
@@ -1544,6 +1525,10 @@ fn run_mysql_cli_contention_journey(environment_variable: &str, expected_vendor:
         .wait_with_output()
         .expect("collect competing MySQL/MariaDB CLI output");
 
+    proxy
+        .control
+        .send(MysqlProxyControl::Resume)
+        .expect("release the held MySQL/MariaDB statement");
     let first_deadline = Instant::now() + Duration::from_secs(12);
     let mut first_completed = false;
     while Instant::now() < first_deadline {
@@ -1559,10 +1544,15 @@ fn run_mysql_cli_contention_journey(environment_variable: &str, expected_vendor:
     }
     if !first_completed {
         let _ = first.kill();
+        let _ = proxy.control.send(MysqlProxyControl::Stop);
     }
     let first_output = first
         .wait_with_output()
         .expect("collect first MySQL/MariaDB CLI output");
+    let proxy_result = proxy
+        .thread
+        .join()
+        .expect("MySQL contention proxy thread did not panic");
 
     let run_count = mysql_scalar(
         &base_url,
@@ -1596,16 +1586,28 @@ fn run_mysql_cli_contention_journey(environment_variable: &str, expected_vendor:
 
     assert!(
         competing_completed,
-        "competing CLI did not honor the zero-second lock timeout"
+        "competing CLI did not honor the zero-second lock timeout; stdout={}, stderr={}",
+        String::from_utf8_lossy(&competing_output.stdout),
+        String::from_utf8_lossy(&competing_output.stderr)
     );
-    assert_eq!(competing_output.status.code(), Some(5));
+    assert_eq!(
+        competing_output.status.code(),
+        Some(5),
+        "competing CLI stdout={}, stderr={}",
+        String::from_utf8_lossy(&competing_output.stdout),
+        String::from_utf8_lossy(&competing_output.stderr)
+    );
     assert_eq!(
         json(&competing_output)["errors"][0]["code"],
         "LOCK_UNAVAILABLE"
     );
     assert!(
+        proxy_result.is_ok(),
+        "MySQL statement proxy failed: {proxy_result:?}"
+    );
+    assert!(
         first_completed,
-        "first CLI did not finish after its sleeping statement"
+        "first CLI did not finish after its held statement"
     );
     assert!(
         first_output.status.success(),
@@ -1624,8 +1626,18 @@ fn run_mysql_cli_contention_journey(environment_variable: &str, expected_vendor:
     cleanup.expect("drop isolated MySQL/MariaDB contention database");
 }
 
+fn is_tested_mysql_line(server_version: &str) -> bool {
+    for prefix in ["8.0.", "8.4.", "9.7."] {
+        if server_version.starts_with(prefix) {
+            return true;
+        }
+    }
+
+    false
+}
+
 fn is_tested_mariadb_line(server_version: &str) -> bool {
-    for prefix in ["10.11.", "11.4.", "11.8.", "13.0."] {
+    for prefix in ["10.11.", "11.4.", "11.8.", "12.3.", "13.0."] {
         if server_version.starts_with(prefix) {
             return true;
         }
@@ -1670,8 +1682,7 @@ fn run_mysql_shared_schema_namespaces_journey(environment_variable: &str, expect
         );
     } else {
         assert!(
-            !is_mariadb
-                && (server_version.starts_with("8.4.") || server_version.starts_with("9.7.")),
+            !is_mariadb && is_tested_mysql_line(&server_version),
             "configured target is not a tested MySQL line"
         );
     }
@@ -1992,8 +2003,7 @@ fn run_mysql_metadata_bootstrap_failure_journey(environment_variable: &str, expe
         );
     } else {
         assert!(
-            !is_mariadb
-                && (server_version.starts_with("8.4.") || server_version.starts_with("9.7.")),
+            !is_mariadb && is_tested_mysql_line(&server_version),
             "configured target is not a tested MySQL line"
         );
     }
@@ -2214,8 +2224,7 @@ fn run_mysql_metadata_upgrade_failure_journey(environment_variable: &str, expect
         );
     } else {
         assert!(
-            !is_mariadb
-                && (server_version.starts_with("8.4.") || server_version.starts_with("9.7.")),
+            !is_mariadb && is_tested_mysql_line(&server_version),
             "configured target is not a tested MySQL line"
         );
     }
@@ -2559,8 +2568,7 @@ fn run_mysql_post_intent_before_sql_journey(environment_variable: &str, expected
         );
     } else {
         assert!(
-            !is_mariadb
-                && (server_version.starts_with("8.4.") || server_version.starts_with("9.7.")),
+            !is_mariadb && is_tested_mysql_line(&server_version),
             "configured target is not a tested MySQL line"
         );
     }
@@ -2788,8 +2796,7 @@ fn run_mysql_before_intent_journey(environment_variable: &str, expected_vendor: 
         );
     } else {
         assert!(
-            !is_mariadb
-                && (server_version.starts_with("8.4.") || server_version.starts_with("9.7.")),
+            !is_mariadb && is_tested_mysql_line(&server_version),
             "configured target is not a tested MySQL line"
         );
     }
@@ -3061,8 +3068,7 @@ fn run_mysql_acknowledgement_boundary_journey(
         );
     } else {
         assert!(
-            !is_mariadb
-                && (server_version.starts_with("8.4.") || server_version.starts_with("9.7.")),
+            !is_mariadb && is_tested_mysql_line(&server_version),
             "configured target is not a tested MySQL line"
         );
     }
@@ -3290,6 +3296,32 @@ fn run_mysql_acknowledgement_boundary_journey(
     assert_eq!(retry.status.code(), Some(9));
     assert_eq!(json(&retry)["errors"][0]["code"], "SAFETY_BLOCKED");
     cleanup.expect("drop isolated MySQL/MariaDB acknowledgement database");
+}
+
+#[test]
+fn postgres_database_url_replaces_only_the_database_name() {
+    assert_eq!(
+        postgres_database_url(
+            "postgres://dbm@127.0.0.1:5432/dbm?sslmode=disable",
+            "dbm_private"
+        ),
+        "postgres://dbm@127.0.0.1:5432/dbm_private?sslmode=disable"
+    );
+}
+
+fn postgres_database_url(database_url: &str, database_name: &str) -> String {
+    let (without_query, query) = match database_url.split_once('?') {
+        Some((path, query)) => (path, Some(query)),
+        None => (database_url, None),
+    };
+    let (prefix, current_name) = without_query
+        .rsplit_once('/')
+        .expect("PostgreSQL URL includes a database name");
+    assert!(!current_name.is_empty() && !prefix.is_empty());
+    match query {
+        Some(query) => format!("{prefix}/{database_name}?{query}"),
+        None => format!("{prefix}/{database_name}"),
+    }
 }
 
 fn postgres_batch_execute(connection_url: &str, sql: &str) -> Result<(), String> {
@@ -3535,9 +3567,13 @@ fn start_postgres_statement_hold_proxy(
         .get_hosts()
         .first()
         .expect("test database URL selects one loopback host");
-    let Host::Tcp(target_host) = target_host else {
-        panic!("statement proxy requires a TCP loopback test target");
+    #[cfg(unix)]
+    let target_host = match target_host {
+        Host::Tcp(target_host) => target_host,
+        Host::Unix(_) => panic!("statement proxy requires a TCP loopback test target"),
     };
+    #[cfg(not(unix))]
+    let Host::Tcp(target_host) = target_host;
     let target_ip = IpAddr::from_str(target_host)
         .expect("statement proxy test target must use a literal loopback address");
     assert!(target_ip.is_loopback());
@@ -4282,17 +4318,30 @@ fn killing_cli_during_a_transaction_keeps_the_next_write_blocked() {
     );
 }
 
-fn sqlite_journal_identity(path: &Path) -> Option<(u64, u64)> {
-    let metadata = fs::metadata(path).ok()?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        Some((metadata.dev(), metadata.ino()))
+enum SqliteImmediateProbe {
+    Busy,
+    Acquired(rusqlite::Connection),
+}
+
+fn probe_sqlite_immediate_transaction(path: &Path) -> SqliteImmediateProbe {
+    let connection = rusqlite::Connection::open(path).expect("open SQLite write-lock probe");
+    connection
+        .busy_timeout(Duration::ZERO)
+        .expect("disable SQLite busy waiting on the write-lock probe");
+    match connection.execute_batch("BEGIN IMMEDIATE") {
+        Ok(()) => SqliteImmediateProbe::Acquired(connection),
+        Err(error) if sqlite_failure_is_lock(&error) => SqliteImmediateProbe::Busy,
+        Err(error) => panic!("probe SQLite immediate transaction: {error}"),
     }
-    #[cfg(not(unix))]
-    {
-        let _ = metadata;
-        Some((0, 1))
+}
+
+fn sqlite_failure_is_lock(error: &rusqlite::Error) -> bool {
+    match error {
+        rusqlite::Error::SqliteFailure(failure, _) => matches!(
+            failure.code,
+            rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+        ),
+        _ => false,
     }
 }
 
@@ -4371,9 +4420,12 @@ fn sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved() {
 
     let deadline = Instant::now() + Duration::from_secs(45);
     let mut durable_started_run = false;
-    let mut migration_journal_seen = false;
-    let mut migration_journal_identity = None;
-    let mut rollback_seen = false;
+    // The migration SQL is short. The failed-run update is held open by a
+    // trigger. Windows cannot stat the rollback journal while SQLite has it
+    // open, so a write lock that outlives the SQL is that failed-run
+    // transaction. A lock taken after the SQL releases is the same gap.
+    let mut saw_migration_writer = false;
+    let mut migration_writer_busy_since: Option<Instant> = None;
     let mut failed_run_persistence_observed = false;
     let mut failed_run_commit_blocker = None;
     while Instant::now() < deadline {
@@ -4382,7 +4434,7 @@ fn sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved() {
                 .wait_with_output()
                 .expect("collect SQLite migration output after early exit");
             panic!(
-                "SQLite migration exited before rollback persistence window: {status}; started={durable_started_run}, migration journal={migration_journal_seen}, rollback={rollback_seen}; stdout={}, stderr={}",
+                "SQLite migration exited before rollback persistence window: {status}; started={durable_started_run}, writer={saw_migration_writer}; stdout={}, stderr={}",
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
             );
@@ -4403,31 +4455,31 @@ fn sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved() {
         }
 
         if durable_started_run {
-            let journal_identity = sqlite_journal_identity(&journal_path);
-            if migration_journal_identity.is_none() {
-                if journal_identity.is_some() {
-                    migration_journal_identity = journal_identity;
-                    migration_journal_seen = true;
+            match probe_sqlite_immediate_transaction(&database_path) {
+                SqliteImmediateProbe::Busy => {
+                    saw_migration_writer = true;
+                    let busy_since = match migration_writer_busy_since {
+                        Some(busy_since) => busy_since,
+                        None => {
+                            let busy_since = Instant::now();
+                            migration_writer_busy_since = Some(busy_since);
+                            busy_since
+                        }
+                    };
+                    if busy_since.elapsed() >= Duration::from_secs(1) {
+                        failed_run_persistence_observed = true;
+                        break;
+                    }
                 }
-            } else if journal_identity != migration_journal_identity {
-                rollback_seen = true;
-                if journal_identity.is_none() && failed_run_commit_blocker.is_none() {
-                    let blocker = rusqlite::Connection::open(&database_path)
-                        .expect("open SQLite rollback observer");
-                    blocker
-                        .execute_batch("BEGIN DEFERRED")
-                        .expect("begin SQLite rollback observation transaction");
-                    let _: i64 = blocker
-                        .query_row("SELECT COUNT(*) FROM schema_migration_runs", [], |row| {
-                            row.get(0)
-                        })
-                        .expect("hold a SQLite read lock after migration rollback");
-                    failed_run_commit_blocker = Some(blocker);
+                SqliteImmediateProbe::Acquired(connection) => {
+                    if saw_migration_writer {
+                        failed_run_commit_blocker = Some(connection);
+                        failed_run_persistence_observed = true;
+                        break;
+                    }
+                    drop(connection);
+                    migration_writer_busy_since = None;
                 }
-            }
-            if rollback_seen && journal_identity.is_some() {
-                failed_run_persistence_observed = true;
-                break;
             }
         }
         thread::sleep(Duration::from_millis(1));
@@ -4439,7 +4491,7 @@ fn sqlite_crash_after_rollback_before_failure_record_keeps_run_unresolved() {
             .wait_with_output()
             .expect("collect SQLite process after rollback-window timeout");
         panic!(
-            "did not observe SQLite rollback followed by failed-run persistence; started={durable_started_run}, migration journal={migration_journal_seen}, rollback={rollback_seen}; stdout={}, stderr={}",
+            "did not observe SQLite rollback followed by failed-run persistence; started={durable_started_run}, writer={saw_migration_writer}; stdout={}, stderr={}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
@@ -4804,6 +4856,7 @@ fn cli_runs_postgres_transactional_and_concurrent_index_migrations() {
     assert!(parsed.get_hosts().iter().all(|host| match host {
         Host::Tcp(host) if host.eq_ignore_ascii_case("localhost") => true,
         Host::Tcp(host) => IpAddr::from_str(host).is_ok_and(|address| address.is_loopback()),
+        #[cfg(unix)]
         Host::Unix(_) => true,
     }));
     assert!(parsed.get_hostaddrs().iter().all(IpAddr::is_loopback));
@@ -4949,6 +5002,7 @@ fn cli_process_death_at_postgres_recovery_boundaries_keeps_runs_unresolved() {
     assert!(parsed.get_hosts().iter().all(|host| match host {
         Host::Tcp(host) if host.eq_ignore_ascii_case("localhost") => true,
         Host::Tcp(host) => IpAddr::from_str(host).is_ok_and(|address| address.is_loopback()),
+        #[cfg(unix)]
         Host::Unix(_) => true,
     }));
     assert!(parsed.get_hostaddrs().iter().all(IpAddr::is_loopback));
@@ -5540,6 +5594,7 @@ fn cli_process_death_after_postgres_intent_before_sql_keeps_the_intent() {
     assert!(parsed.get_hosts().iter().all(|host| match host {
         Host::Tcp(host) if host.eq_ignore_ascii_case("localhost") => true,
         Host::Tcp(host) => IpAddr::from_str(host).is_ok_and(|address| address.is_loopback()),
+        #[cfg(unix)]
         Host::Unix(_) => true,
     }));
     assert!(parsed.get_hostaddrs().iter().all(IpAddr::is_loopback));
@@ -5697,6 +5752,7 @@ fn cli_postgres_competing_writers_same_namespace_are_serialized() {
     assert!(parsed.get_hosts().iter().all(|host| match host {
         Host::Tcp(host) if host.eq_ignore_ascii_case("localhost") => true,
         Host::Tcp(host) => IpAddr::from_str(host).is_ok_and(|address| address.is_loopback()),
+        #[cfg(unix)]
         Host::Unix(_) => true,
     }));
     assert!(parsed.get_hostaddrs().iter().all(IpAddr::is_loopback));
@@ -5864,19 +5920,24 @@ fn cli_postgres_metadata_bootstrap_failure_rolls_back_all_reserved_tables() {
     assert!(parsed.get_hosts().iter().all(|host| match host {
         Host::Tcp(host) if host.eq_ignore_ascii_case("localhost") => true,
         Host::Tcp(host) => IpAddr::from_str(host).is_ok_and(|address| address.is_loopback()),
+        #[cfg(unix)]
         Host::Unix(_) => true,
     }));
     assert!(parsed.get_hostaddrs().iter().all(IpAddr::is_loopback));
     assert!(!database_url.contains("options="));
 
+    let private_name = format!("dbm_{}", uuid::Uuid::new_v4().simple());
+    postgres_batch_execute(&database_url, &format!("CREATE DATABASE {private_name}"))
+        .expect("create a private PostgreSQL database for the bootstrap fault");
+    let private_url = postgres_database_url(&database_url, &private_name);
     let schema = format!("dbm_bootstrap_failure_{}", uuid::Uuid::new_v4().simple());
-    let schema_url = format!("{database_url}&options=-c%20search_path%3D{schema}%2Cpublic");
+    let schema_url = format!("{private_url}&options=-c%20search_path%3D{schema}%2Cpublic");
     let mut schema_cleanup = PostgresSchemaCleanup {
-        connection_url: database_url.clone(),
+        connection_url: private_url.clone(),
         schema: schema.clone(),
         cleaned: false,
     };
-    postgres_batch_execute(&database_url, &format!("CREATE SCHEMA {schema}"))
+    postgres_batch_execute(&private_url, &format!("CREATE SCHEMA {schema}"))
         .expect("create isolated metadata-bootstrap schema");
     let function = format!(
         "reject_metadata_bootstrap_{}",
@@ -5935,6 +5996,11 @@ fn cli_postgres_metadata_bootstrap_failure_rolls_back_all_reserved_tables() {
     schema_cleanup
         .clean()
         .expect("drop isolated metadata-bootstrap schema");
+    postgres_batch_execute(
+        &database_url,
+        &format!("DROP DATABASE {private_name} WITH (FORCE)"),
+    )
+    .expect("drop the private PostgreSQL database");
 }
 
 #[test]
@@ -6108,11 +6174,14 @@ fn run_mysql_tls_validation(url_environment_variable: &str, ca_environment_varia
         url_environment_variable,
         &connection_url,
     );
-    assert!(
-        trusted.status.success(),
-        "MySQL/MariaDB TLS with the configured CA failed: {}",
-        String::from_utf8_lossy(&trusted.stdout)
-    );
+    if !trusted.status.success() {
+        panic!(
+            "MySQL/MariaDB TLS with the configured CA failed: status={:?} stdout={} stderr={}",
+            trusted.status.code(),
+            String::from_utf8_lossy(&trusted.stdout),
+            String::from_utf8_lossy(&trusted.stderr)
+        );
+    }
     assert_eq!(json(&trusted)["read_only"], true);
 
     let hostname_mismatch_url = mysql_url_with_hostname(&connection_url, "localhost");
