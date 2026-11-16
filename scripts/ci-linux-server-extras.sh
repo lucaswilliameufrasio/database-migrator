@@ -141,7 +141,9 @@ extendedKeyUsage = serverAuth
 EOF
 openssl req -x509 -newkey rsa:2048 -nodes \
   -keyout "${certs}/ca.key" -out "${certs}/ca.pem" -days 2 \
-  -subj '/CN=dbm-test-ca'
+  -subj '/CN=dbm-test-ca' \
+  -addext 'basicConstraints=critical,CA:TRUE' \
+  -addext 'keyUsage=critical,keyCertSign,cRLSign'
 openssl req -newkey rsa:2048 -nodes \
   -keyout "${certs}/server.key" -out "${certs}/server.csr" \
   -subj '/CN=127.0.0.1'
@@ -149,6 +151,7 @@ openssl x509 -req -in "${certs}/server.csr" \
   -CA "${certs}/ca.pem" -CAkey "${certs}/ca.key" -CAcreateserial \
   -out "${certs}/server.crt" -days 2 \
   -extfile "${certs}/san.cnf" -extensions ext
+openssl verify -CAfile "${certs}/ca.pem" "${certs}/server.crt"
 sudo chown 999:999 "${certs}/server.key"
 sudo chmod 600 "${certs}/server.key"
 
@@ -197,4 +200,10 @@ export DBM_TEST_MYSQL_TLS_URL='mysql://dbm:dbm@127.0.0.1:3308/dbm?require_ssl=tr
 export DBM_TEST_MYSQL_CA_FILE="${certs}/ca.pem"
 export DBM_TEST_MARIADB_TLS_URL='mysql://dbm:dbm@127.0.0.1:3309/dbm?require_ssl=true'
 export DBM_TEST_MARIADB_CA_FILE="${certs}/ca.pem"
-cargo test --workspace --all-features --locked -- --ignored _tls_ --test-threads=1
+if ! cargo test --workspace --all-features --locked --no-fail-fast -- --ignored _tls_ --test-threads=1; then
+  echo "TLS tests failed; container logs follow" >&2
+  docker logs dbm-pg-tls >&2 || true
+  docker logs dbm-mysql-tls >&2 || true
+  docker logs dbm-maria-tls >&2 || true
+  exit 1
+fi

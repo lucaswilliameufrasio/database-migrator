@@ -6174,11 +6174,14 @@ fn run_mysql_tls_validation(url_environment_variable: &str, ca_environment_varia
         url_environment_variable,
         &connection_url,
     );
-    assert!(
-        trusted.status.success(),
-        "MySQL/MariaDB TLS with the configured CA failed: {}",
-        String::from_utf8_lossy(&trusted.stdout)
-    );
+    if !trusted.status.success() {
+        panic!(
+            "MySQL/MariaDB TLS with the configured CA failed: status={:?} stdout={} stderr={}",
+            trusted.status.code(),
+            String::from_utf8_lossy(&trusted.stdout),
+            String::from_utf8_lossy(&trusted.stderr)
+        );
+    }
     assert_eq!(json(&trusted)["read_only"], true);
 
     let hostname_mismatch_url = mysql_url_with_hostname(&connection_url, "localhost");

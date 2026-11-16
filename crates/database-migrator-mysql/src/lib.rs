@@ -266,8 +266,29 @@ struct MySqlSession {
     closed: bool,
 }
 
+fn ensure_mysql_tls_provider() -> Result<()> {
+    // mysql_async uses ClientConfig::builder(). That panics when ring and
+    // aws-lc-rs are both compiled in and this process has no default provider.
+    if rustls::crypto::CryptoProvider::get_default().is_some() {
+        return Ok(());
+    }
+    match rustls::crypto::ring::default_provider().install_default() {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            if rustls::crypto::CryptoProvider::get_default().is_some() {
+                Ok(())
+            } else {
+                Err(driver_error(
+                    "could not select a TLS provider for the MySQL connection",
+                ))
+            }
+        }
+    }
+}
+
 impl MySqlSession {
     async fn connect_from_options(opts: Opts, intent: SessionIntent) -> Result<Self> {
+        ensure_mysql_tls_provider()?;
         let target_identity = mysql_target_identity(&opts);
         let mut connection = Conn::new(opts).await.map_err(|_| {
             driver_error("connection failed; credentials and connection details are redacted")
@@ -2550,8 +2571,9 @@ fn legacy_row_error(tool: &str, field: &str) -> DbmError {
 #[cfg(test)]
 mod tests {
     use super::{
-        Conn, DatabaseVendor, MySqlSession, Opts, OptsBuilder, ensure_supported_server_version,
-        is_local_mysql_host, mysql_lock_name, normalized_check_clause, prepare_connection_options,
+        Conn, DatabaseVendor, MySqlSession, Opts, OptsBuilder, ensure_mysql_tls_provider,
+        ensure_supported_server_version, is_local_mysql_host, mysql_lock_name,
+        normalized_check_clause, prepare_connection_options,
     };
     use database_migrator_core::config::{
         Config, Environment, ExecutionConfig, LoadedConfig, ProjectDirectory, TargetConfig,
@@ -2713,6 +2735,12 @@ mod tests {
         assert!(matches!(result, Err(DbmError::Safety(_))));
     }
 
+    #[test]
+    fn mysql_tls_provider_install_lets_rustls_build_a_client() {
+        ensure_mysql_tls_provider().expect("MySQL TLS provider installs");
+        let _builder = rustls::ClientConfig::builder();
+    }
+
     #[tokio::test]
     #[ignore = "requires DBM_TEST_MYSQL_URL for a disposable loopback MySQL or MariaDB database"]
     async fn local_mysql_legacy_import_adapters_preserve_knex_goose_and_sqlx_history() {
@@ -2729,6 +2757,7 @@ mod tests {
             "integration target must be loopback"
         );
         let database = format!("dbm_legacy_{}", uuid::Uuid::new_v4().simple());
+        ensure_mysql_tls_provider().expect("MySQL TLS provider installs");
         let mut setup_connection = Conn::new(options.clone())
             .await
             .expect("connect to disposable local MySQL/MariaDB database");

@@ -1149,6 +1149,9 @@ impl OpenAiCompatibleProvider {
         );
         let endpoint = reqwest::Url::parse(&endpoint_text)
             .map_err(|_| ai_error("AI_ENDPOINT_INVALID", "the AI profile endpoint is invalid"))?;
+        if rustls::crypto::CryptoProvider::get_default().is_none() {
+            let _installed = rustls::crypto::ring::default_provider().install_default();
+        }
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(profile.timeout_seconds))
             .redirect(reqwest::redirect::Policy::none())
@@ -1347,6 +1350,11 @@ mod tests {
         ProposalFile, ProposalFileType, ReviewReport, build_messages, parse_and_validate_response,
         redact_json, redact_sensitive_text, safe_sql_basename, validate_approved_endpoint,
     };
+
+    #[test]
+    fn ai_feature_does_not_make_the_rustls_provider_ambiguous() {
+        let _builder = rustls::ClientConfig::builder();
+    }
     #[cfg(unix)]
     use super::{MAX_CONTEXT_FILE_BYTES, read_context_file_from_canonical};
     use crate::config::{

@@ -53,7 +53,7 @@ cli = ["dep:clap", "database-migrator-core/cli", "runner", "legacy"]
 runner = []
 legacy = []
 dsl = []
-ai = ["dep:cap-fs-ext", "dep:reqwest"]
+ai = ["dep:cap-fs-ext", "dep:reqwest", "dep:rustls"]
 test-runner-fixture = ["dsl", "runner"]
 fuzzing-harness = []
 
@@ -66,7 +66,9 @@ clap = { version = "4.6.7", features = ["derive"], optional = true }
 cap-std = "4.0.3"
 cap-fs-ext = { version = "4.0.3", optional = true }
 rusqlite = { version = "0.41.1", features = ["bundled", "hooks"] }
-reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"], optional = true }
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls-no-provider"], optional = true }
+# ring only. mysql_async calls ClientConfig::builder(), which panics when aws-lc-rs is enabled beside ring.
+rustls = { version = "0.23.0", default-features = false, features = ["ring", "std", "tls12"], optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"
