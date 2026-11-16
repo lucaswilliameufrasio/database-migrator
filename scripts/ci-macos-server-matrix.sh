@@ -6,10 +6,11 @@
 #
 # The workflow selects one declared line of each server. Homebrew bottles
 # checked on 2026-11-16 were postgresql@16 16.16, postgresql@17 17.12,
-# postgresql@18 18.7, mysql@8.4 8.4.13, mysql@9.7 9.7.4, mariadb@10.11
-# 10.11.19, mariadb@11.4 11.4.13, mariadb@11.8 11.8.9, and mariadb 13.0.2
-# (installable as the mariadb@13.0 alias). MySQL 8.0 and MariaDB 12.3 are
-# bottled too, and the crate rejects both, so this script refuses them.
+# postgresql@18 18.7, mysql@8.0 8.0.46, mysql@8.4 8.4.13, mysql@9.7 9.7.4,
+# mariadb@10.11 10.11.19, mariadb@11.4 11.4.13, mariadb@11.8 11.8.9,
+# mariadb@12.3 12.3.3, and mariadb 13.0.2 (installable as the mariadb@13.0
+# alias). MySQL 8.0 left Oracle support on 2026-04-30. MariaDB 12.3 is an
+# LTS line. The crate accepts both, and one cell exercises them.
 set -euo pipefail
 
 postgres_formula="${DBM_MACOS_POSTGRES_FORMULA:-postgresql@18}"
@@ -25,7 +26,7 @@ require_choice() {
   case "${kind}" in
     formula)
       case "${value}" in
-        postgresql@16|postgresql@17|postgresql@18|mysql@8.4|mysql@9.7|mariadb@10.11|mariadb@11.4|mariadb@11.8|mariadb|mariadb@13.0)
+        postgresql@16|postgresql@17|postgresql@18|mysql@8.0|mysql@8.4|mysql@9.7|mariadb@10.11|mariadb@11.4|mariadb@11.8|mariadb@12.3|mariadb|mariadb@13.0)
           ;;
         *)
           echo "refusing formula ${value}" >&2
@@ -35,7 +36,7 @@ require_choice() {
       ;;
     prefix)
       case "${value}" in
-        16.|17.|18.|8.4.|9.7.|10.11.|11.4.|11.8.|13.0.)
+        16.|17.|18.|8.0.|8.4.|9.7.|10.11.|11.4.|11.8.|12.3.|13.0.)
           ;;
         *)
           echo "refusing version prefix ${value}" >&2
@@ -65,14 +66,14 @@ case "${postgres_formula}" in
     ;;
 esac
 case "${mysql_formula}" in
-  mysql@8.4|mysql@9.7) ;;
+  mysql@8.0|mysql@8.4|mysql@9.7) ;;
   *)
     echo "mysql formula is ${mysql_formula}" >&2
     exit 1
     ;;
 esac
 case "${mariadb_formula}" in
-  mariadb@10.11|mariadb@11.4|mariadb@11.8|mariadb|mariadb@13.0) ;;
+  mariadb@10.11|mariadb@11.4|mariadb@11.8|mariadb@12.3|mariadb|mariadb@13.0) ;;
   *)
     echo "mariadb formula is ${mariadb_formula}" >&2
     exit 1

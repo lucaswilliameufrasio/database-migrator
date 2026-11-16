@@ -87,12 +87,11 @@ jobs:
   # PostgreSQL, MySQL, and MariaDB fault matrix on macOS. Service containers
   # are Linux-only, so the script installs Homebrew servers on 127.0.0.1.
   # Each cell runs the same ignored suite against one declared line of each
-  # server: the current trio, the older PostgreSQL and MariaDB lines, and the
-  # newer MySQL 9.7 plus MariaDB 13.0 lines. MySQL 8.0 and MariaDB 12.3 stay
-  # out because the crate rejects them. Windows stays outside this job.
-  # PgBouncer and the TLS tests stay skipped.
-  # actions/checkout below was rechecked on 2026-11-16 and is still v7.0.1,
-  # so this matrix does not change that pin.
+  # server. The fifth cell is MySQL 8.0 with MariaDB 12.3. PgBouncer, TLS,
+  # and the parallel suite run in the Linux extras job. Windows servers run
+  # in server-fault-windows.
+  # actions/checkout below was rechecked on 2026-11-16 and is still v7.0.1
+  # (published 2026-07-20, commit 3d3c42e5aac5ba805825da76410c181273ba90b1).
   server-fault-macos:
     name: Server fault matrix (${{ matrix.label }})
     runs-on: macos-latest
@@ -129,6 +128,13 @@ jobs:
             mysql_prefix: "9.7."
             mariadb_formula: mariadb@13.0
             mariadb_prefix: "13.0."
+          - label: pg18-mysql80-maria123
+            postgres_formula: postgresql@18
+            postgres_prefix: "18."
+            mysql_formula: mysql@8.0
+            mysql_prefix: "8.0."
+            mariadb_formula: mariadb@12.3
+            mariadb_prefix: "12.3."
     defaults:
       run:
         shell: bash
@@ -166,6 +172,57 @@ jobs:
           DBM_MACOS_MARIADB_FORMULA: ${{ matrix.mariadb_formula }}
           DBM_MACOS_MARIADB_PREFIX: ${{ matrix.mariadb_prefix }}
         run: bash scripts/ci-macos-server-matrix.sh
+
+  # Plaintext servers in Docker, then the parallel ignored suite, PgBouncer,
+  # and the three TLS tests. actions/checkout was rechecked on 2026-11-16
+  # and remains v7.0.1.
+  server-extras-linux:
+    name: Parallel suite, PgBouncer, and TLS
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal
+
+      - name: Compile the suite before starting databases
+        run: cargo test --workspace --all-features --locked --no-run
+
+      - name: Run parallel, PgBouncer, and TLS checks
+        run: bash scripts/ci-linux-server-extras.sh
+
+  # Native servers on windows-latest. The zip archives are the upstream
+  # Windows builds. actions/checkout was rechecked on 2026-11-16 and remains
+  # v7.0.1.
+  server-fault-windows:
+    name: Server fault matrix (windows)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Keep repository line endings
+        run: git config --global core.autocrlf false
+
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned Rust toolchain
+        run: |
+          if [ -d "$HOME/.cargo/bin" ]; then
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup toolchain install 1.99.1 --profile minimal
+
+      - name: Compile the suite before starting databases
+        run: cargo test --workspace --all-features --locked --no-run
+
+      - name: Run the ignored server matrix
+        run: pwsh -File scripts/ci-windows-server-matrix.ps1
 
   supply-chain:
     name: Audit dependencies and generate SBOM

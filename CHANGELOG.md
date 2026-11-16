@@ -4,6 +4,21 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## 1.1.0 — 2026-11-16
+
+The public Rust API and metadata format 5 stay compatible with 1.0.0. This
+release does not publish the crate to crates.io.
+
+### Added
+
+- MySQL 8.0 and MariaDB 12.3 are accepted server lines. MySQL 8.0 left Oracle
+  extended support on 2026-04-30 and stays available for migrations off that
+  series. MariaDB 12.3 is a maintained LTS line. MySQL 9.6, MariaDB 10.6, and
+  MariaDB 12.2 stay refused.
+- GitHub Actions runs the ignored server suite on `windows-latest`, adds a
+  macOS cell for MySQL 8.0 and MariaDB 12.3, and runs the parallel ignored
+  suite, PgBouncer, and the three TLS tests on Linux.
+
 ## 1.0.0 — 2026-11-13
 
 This release freezes the implemented Rust API and metadata format 5 for Linux

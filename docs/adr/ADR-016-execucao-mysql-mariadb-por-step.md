@@ -100,3 +100,17 @@ Não se ampliaram as linhas aceitas para versões intermediárias não verificad
 como MySQL 9.6 ou MariaDB 12.3. Reavaliar a lista quando uma nova versão estável
 for publicada; executar novamente a matriz focada não substitui a cobertura
 completa antes de declarar G11 concluído.
+
+## Decisão de acompanhamento: MySQL 8.0 e MariaDB 12.3 (2026-11-16)
+
+O responsável pelo projeto pediu para exercitar MySQL 8 e MariaDB 12, além de
+servidor no runner Windows, PgBouncer, TLS e a suíte ignorada sem
+`--test-threads=1`. A recusa anterior não vinha de um defeito de SQL observado.
+A lista em `ensure_supported_server_version` só nomeava linhas que já tinham
+jornada. MySQL 8.0 encerrou o suporte estendido da Oracle em 2026-04-30; a
+linha entra mesmo assim, para quem ainda precisa migrar um servidor dessa
+série, e não substitui MySQL 8.4 como linha LTS atual. MariaDB 12.3, que o
+parágrafo de 2026-11-07 citava como intermediária não verificada, é hoje uma
+série LTS com manutenção comunitária até 2029. MySQL 9.6, MariaDB 10.6 e
+MariaDB 12.2 continuam de fora. A matriz de suporte só cita a versão que um
+job verde imprimir.

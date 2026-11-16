@@ -2454,11 +2454,13 @@ fn ensure_supported_server_version(vendor: DatabaseVendor, version: &str) -> Res
     let minor = numbers.next();
     let supported = matches!(
         (vendor, major, minor),
-        (DatabaseVendor::MySql, Some(8), Some(4))
+        (DatabaseVendor::MySql, Some(8), Some(0))
+            | (DatabaseVendor::MySql, Some(8), Some(4))
             | (DatabaseVendor::MySql, Some(9), Some(7))
             | (DatabaseVendor::MariaDb, Some(10), Some(11))
             | (DatabaseVendor::MariaDb, Some(11), Some(4))
             | (DatabaseVendor::MariaDb, Some(11), Some(8))
+            | (DatabaseVendor::MariaDb, Some(12), Some(3))
             | (DatabaseVendor::MariaDb, Some(13), Some(0))
     );
     if !supported {
@@ -2599,6 +2601,7 @@ mod tests {
 
     #[test]
     fn supports_declared_mysql_and_mariadb_lines() {
+        assert!(ensure_supported_server_version(DatabaseVendor::MySql, "8.0.46").is_ok());
         assert!(ensure_supported_server_version(DatabaseVendor::MySql, "8.4.5").is_ok());
         assert!(ensure_supported_server_version(DatabaseVendor::MySql, "9.7.4").is_ok());
         assert!(
@@ -2609,14 +2612,15 @@ mod tests {
                 .is_ok()
         );
         assert!(ensure_supported_server_version(DatabaseVendor::MariaDb, "11.8.2-MariaDB").is_ok());
+        assert!(ensure_supported_server_version(DatabaseVendor::MariaDb, "12.3.4-MariaDB").is_ok());
         assert!(ensure_supported_server_version(DatabaseVendor::MariaDb, "13.0.2-MariaDB").is_ok());
-        assert!(ensure_supported_server_version(DatabaseVendor::MySql, "8.0.42").is_err());
+        assert!(ensure_supported_server_version(DatabaseVendor::MySql, "5.7.44").is_err());
         assert!(ensure_supported_server_version(DatabaseVendor::MySql, "9.6.0").is_err());
         assert!(
             ensure_supported_server_version(DatabaseVendor::MariaDb, "10.6.23-MariaDB").is_err()
         );
         assert!(
-            ensure_supported_server_version(DatabaseVendor::MariaDb, "12.3.3-MariaDB").is_err()
+            ensure_supported_server_version(DatabaseVendor::MariaDb, "12.2.2-MariaDB").is_err()
         );
     }
 

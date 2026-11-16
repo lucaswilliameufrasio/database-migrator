@@ -882,8 +882,8 @@ fn run_mysql_cli_journey(environment_variable: &str, expected_vendor: &str) {
         );
     } else {
         assert!(
-            !is_mariadb && (version.starts_with("8.4.") || version.starts_with("9.7.")),
-            "the configured integration server is not MySQL 8.4 or 9.7"
+            !is_mariadb && is_tested_mysql_line(&version),
+            "the configured integration server is not a tested MySQL line"
         );
     }
     let database = format!("dbm_f5_{}", uuid::Uuid::new_v4().simple());
@@ -1415,7 +1415,7 @@ fn run_mysql_cli_contention_journey(environment_variable: &str, expected_vendor:
         assert!(is_mariadb, "configured target is not MariaDB");
     } else {
         assert!(
-            !is_mariadb && (version.starts_with("8.4.") || version.starts_with("9.7.")),
+            !is_mariadb && is_tested_mysql_line(&version),
             "configured target is not a supported test MySQL line"
         );
     }
@@ -1626,8 +1626,18 @@ fn run_mysql_cli_contention_journey(environment_variable: &str, expected_vendor:
     cleanup.expect("drop isolated MySQL/MariaDB contention database");
 }
 
+fn is_tested_mysql_line(server_version: &str) -> bool {
+    for prefix in ["8.0.", "8.4.", "9.7."] {
+        if server_version.starts_with(prefix) {
+            return true;
+        }
+    }
+
+    false
+}
+
 fn is_tested_mariadb_line(server_version: &str) -> bool {
-    for prefix in ["10.11.", "11.4.", "11.8.", "13.0."] {
+    for prefix in ["10.11.", "11.4.", "11.8.", "12.3.", "13.0."] {
         if server_version.starts_with(prefix) {
             return true;
         }
@@ -1672,8 +1682,7 @@ fn run_mysql_shared_schema_namespaces_journey(environment_variable: &str, expect
         );
     } else {
         assert!(
-            !is_mariadb
-                && (server_version.starts_with("8.4.") || server_version.starts_with("9.7.")),
+            !is_mariadb && is_tested_mysql_line(&server_version),
             "configured target is not a tested MySQL line"
         );
     }
@@ -1994,8 +2003,7 @@ fn run_mysql_metadata_bootstrap_failure_journey(environment_variable: &str, expe
         );
     } else {
         assert!(
-            !is_mariadb
-                && (server_version.starts_with("8.4.") || server_version.starts_with("9.7.")),
+            !is_mariadb && is_tested_mysql_line(&server_version),
             "configured target is not a tested MySQL line"
         );
     }
@@ -2216,8 +2224,7 @@ fn run_mysql_metadata_upgrade_failure_journey(environment_variable: &str, expect
         );
     } else {
         assert!(
-            !is_mariadb
-                && (server_version.starts_with("8.4.") || server_version.starts_with("9.7.")),
+            !is_mariadb && is_tested_mysql_line(&server_version),
             "configured target is not a tested MySQL line"
         );
     }
@@ -2561,8 +2568,7 @@ fn run_mysql_post_intent_before_sql_journey(environment_variable: &str, expected
         );
     } else {
         assert!(
-            !is_mariadb
-                && (server_version.starts_with("8.4.") || server_version.starts_with("9.7.")),
+            !is_mariadb && is_tested_mysql_line(&server_version),
             "configured target is not a tested MySQL line"
         );
     }
@@ -2790,8 +2796,7 @@ fn run_mysql_before_intent_journey(environment_variable: &str, expected_vendor: 
         );
     } else {
         assert!(
-            !is_mariadb
-                && (server_version.starts_with("8.4.") || server_version.starts_with("9.7.")),
+            !is_mariadb && is_tested_mysql_line(&server_version),
             "configured target is not a tested MySQL line"
         );
     }
@@ -3063,8 +3068,7 @@ fn run_mysql_acknowledgement_boundary_journey(
         );
     } else {
         assert!(
-            !is_mariadb
-                && (server_version.starts_with("8.4.") || server_version.starts_with("9.7.")),
+            !is_mariadb && is_tested_mysql_line(&server_version),
             "configured target is not a tested MySQL line"
         );
     }
