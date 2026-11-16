@@ -61,7 +61,26 @@ brew install postgresql@18
 brew install mysql@8.4
 brew unlink mysql@8.4 || true
 rm -rf "${prefix}/var/mysql"
-brew install mariadb@11.8
+# mysql@8.4 writes mysqlx-bind-address into the shared Homebrew my.cnf.
+# MariaDB aborts on that variable, including in the brew postinstall.
+# Servers below pass --no-defaults so they never read this file.
+if [ -f "${prefix}/etc/my.cnf" ]; then
+  mv "${prefix}/etc/my.cnf" "${prefix}/etc/my.cnf.mysql-aside"
+  printf 'moved Homebrew my.cnf to %s\n' "${prefix}/etc/my.cnf.mysql-aside"
+fi
+if ! brew install mariadb@11.8; then
+  maria_ready=""
+  for directory in "${prefix}/Cellar/mariadb@11.8"/*/bin; do
+    if [ -x "${directory}/mariadbd" ]; then
+      maria_ready="${directory}/mariadbd"
+    fi
+  done
+  if [ -z "${maria_ready}" ]; then
+    echo "mariadb bottle did not install" >&2
+    exit 1
+  fi
+  printf 'mariadb postinstall failed; continuing because %s exists\n' "${maria_ready}" >&2
+fi
 brew unlink mariadb@11.8 || true
 rm -rf "${prefix}/var/mysql"
 pg_bin="$(keg_bin postgresql@18)" || exit 1
@@ -116,11 +135,13 @@ host=127.0.0.1
 EOF
 
 "${mysql_bin}/mysqld" \
+  --no-defaults \
   --initialize-insecure \
   --datadir="${mysql_data}" \
   --lower_case_table_names=0 \
   --log-error="${mount}/mysql-init.err"
 "${mysql_bin}/mysqld" \
+  --no-defaults \
   --datadir="${mysql_data}" \
   --bind-address=127.0.0.1 \
   --port=3306 \
@@ -132,8 +153,9 @@ EOF
   --log-error="${mount}/mysql.err" &
 mysql_pid=$!
 
-"${maria_bin}/mariadb-install-db" --datadir="${maria_data}"
+"${maria_bin}/mariadb-install-db" --no-defaults --datadir="${maria_data}"
 "${maria_bin}/mariadbd" \
+  --no-defaults \
   --datadir="${maria_data}" \
   --bind-address=127.0.0.1 \
   --port=3307 \
@@ -163,7 +185,7 @@ wait_sql() {
   socket="$2"
   attempt=1
   while [ "${attempt}" -le 30 ]; do
-    if "${client}" --socket="${socket}" -u root -e 'SELECT 1' >/dev/null 2>&1; then
+    if "${client}" --no-defaults --socket="${socket}" -u root -e 'SELECT 1' >/dev/null 2>&1; then
       return 0
     fi
     attempt=$((attempt + 1))
@@ -178,14 +200,14 @@ wait_tcp 3307
 wait_sql "${mysql_bin}/mysql" "${mysql_socket}"
 wait_sql "${maria_bin}/mariadb" "${maria_socket}"
 
-"${mysql_bin}/mysql" --socket="${mysql_socket}" -u root <<'SQL'
+"${mysql_bin}/mysql" --no-defaults --socket="${mysql_socket}" -u root <<'SQL'
 CREATE DATABASE dbm CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 CREATE USER 'dbm'@'127.0.0.1' IDENTIFIED BY 'dbm';
 GRANT ALL PRIVILEGES ON *.* TO 'dbm'@'127.0.0.1' WITH GRANT OPTION;
 FLUSH PRIVILEGES;
 SQL
 
-"${maria_bin}/mariadb" --socket="${maria_socket}" -u root <<'SQL'
+"${maria_bin}/mariadb" --no-defaults --socket="${maria_socket}" -u root <<'SQL'
 CREATE DATABASE dbm CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 CREATE USER 'dbm'@'127.0.0.1' IDENTIFIED BY 'dbm';
 GRANT ALL PRIVILEGES ON *.* TO 'dbm'@'127.0.0.1' WITH GRANT OPTION;
@@ -193,8 +215,8 @@ FLUSH PRIVILEGES;
 SQL
 
 pg_version="$("${pg_bin}/psql" -h 127.0.0.1 -p 5432 -U dbm -d dbm -Atc 'SHOW server_version')"
-mysql_version="$("${mysql_bin}/mysql" --defaults-extra-file="${mysql_client}" -P 3306 -N -e 'SELECT VERSION()')"
-maria_version="$("${maria_bin}/mariadb" --defaults-extra-file="${maria_client}" -P 3307 -N -e 'SELECT VERSION()')"
+mysql_version="$("${mysql_bin}/mysql" --defaults-file="${mysql_client}" -P 3306 -N -e 'SELECT VERSION()')"
+maria_version="$("${maria_bin}/mariadb" --defaults-file="${maria_client}" -P 3307 -N -e 'SELECT VERSION()')"
 printf 'postgres_version=%s\n' "${pg_version}"
 printf 'mysql_version=%s\n' "${mysql_version}"
 printf 'mariadb_version=%s\n' "${maria_version}"
