@@ -198,6 +198,10 @@ bundled SQLite, `postgres:18.6`, and `mariadb:11.8.9`. Compose publishes both
 servers on `127.0.0.1` only. MySQL is not in that example. The configs use
 `development`.
 
+[examples/local-ledger](examples/local-ledger/README.md) is the phone expense
+ledger. `phone/` holds the up SQL. `dbm chain` replays those bytes and does
+not open `ledger.sqlite`.
+
 ## License
 
 [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
