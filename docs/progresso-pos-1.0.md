@@ -18,7 +18,8 @@ O release 1.0.0 continua valendo como foi evidenciado: Linux x86_64, metadata 5,
 - O produto de cliente fica no repositório público [dbm-sqlite](https://github.com/lucaswilliameufrasio/dbm-sqlite). Ele não depende do crate `database-migrator`. Leva as invariantes do journal, não o formato 5 nem a aprovação de produção. Expo e React Native ficam de fora. Flutter desktop e Flutter web esperam binário e runtime declarados.
 - O `dbm` continua sendo a ferramenta de autoria. O SQL de telefone usa outro diretório e o dialeto SQLite.
 - Ampliar plataforma é CI no GitHub, em runners macOS e Windows. A matriz de suporte só passa a citar o que um job verde cobriu. A matriz de falha com PostgreSQL, MySQL e MariaDB nesses sistemas é outra evidência.
-- Publicação no crates.io, asset de release no GitHub e migration de produção continuam fora até autorização explícita.
+- A publicação no crates.io e a migration de produção continuam fora. O asset
+  Linux da release foi autorizado e publicado em 2026-11-18; veja abaixo.
 
 Sync offline e rotação de chave de SQLCipher não entram neste acompanhamento.
 
@@ -101,10 +102,64 @@ A matriz de versões no macOS, em 2026-11-16, fica fora da tabela. O commit `e98
 
 A suíte de servidores da 1.1.0, em 2026-11-16, fica fora da tabela. O fechamento verde é o push `43843629998`, no commit `3c3e18f0e04887561ff6ee907575ac3d8cb9dd49`. A crate recusava MySQL 8.0 e MariaDB 12.3 porque `ensure_supported_server_version` é uma lista fechada. O commit `55a4b76` passou a aceitar MySQL 8.0, que saiu do suporte estendido da Oracle em 2026-04-30 e permanece na 8.0.46 para quem ainda precisa sair dessa série, e MariaDB 12.3, que é LTS. MySQL 5.7, MySQL 9.6, MariaDB 10.6 e MariaDB 12.2 continuam recusados. O isolamento da suíte paralela e o login dos servidores Windows estão em `6838db0` e `aebcf7d`. O TLS do MySQL escolhe um único provider rustls em `769fedf`, e o lock do fuzz acompanha essa dependência em `3c3e18f`. O mesmo push rodou cinco células no macOS 26.7.2 (Darwin 25.6.0, build 25G332, ARM64), todas na imagem `macos26 20261102.0473.1`. O comando foi `cargo test --workspace --all-features --locked -- --ignored --skip pgbouncer --skip _tls_ --test-threads=1`. Cada célula passou 45 testes e falhou 0: 16 de biblioteca e engine, 23 de CLI, 3 de DSL e 3 de importação legada. As versões impressas foram PostgreSQL 16.15 com MySQL 8.4.13 e MariaDB 10.11.19, PostgreSQL 17.11 com MySQL 8.4.13 e MariaDB 11.4.13, PostgreSQL 18.6 com MySQL 8.4.13 e MariaDB 11.8.9, PostgreSQL 18.6 com MySQL 9.7.4 e MariaDB 13.0.2, e PostgreSQL 18.6 com MySQL 8.0.46 e MariaDB 12.3.3. No Windows Server 2025 o mesmo comando passou 45 testes e falhou 0, com PostgreSQL 18.6, MySQL 8.4.13 e MariaDB 11.8.9. No Linux, `cargo test --workspace --all-features --locked --no-fail-fast -- --ignored --skip pgbouncer --skip _tls_` rodou a suíte ignorada em paralelo contra PostgreSQL 18.7 (Debian 18.7-1.pgdg13+2), MySQL 8.4.13 e MariaDB 11.8.9-MariaDB-ubu2404: 45 testes e 0 falhas. O PgBouncer do apt, 1.22.0-1build4, passou `local_pgbouncer_backend_change_is_rejected_after_session_lock_acquisition`. Os testes de TLS passaram: `mysql_tls_validates_the_configured_ca_and_hostname`, `mariadb_tls_validates_the_configured_ca_and_hostname` e `local_postgres_tls_connection_validates_a_configured_ca`. O PostgreSQL 18.7 desse job é o pacote Debian e não substitui a linha 18.6 da suíte ampla. A evidência Linux da 1.0 não muda. A tabela pós-1.0 não tem próximo item pendente.
 
+## Continuação em 2026-11-18
+
+O responsável autorizou um binário na release, sem publicar no crates.io.
+A release `v1.1.0` recebeu `dbm-1.1.0-linux-x86_64.tar.gz` e seu arquivo
+SHA-256. O build partiu da tag `09aeb5ceb10567601cf64eb321e6f1e0db20495c`,
+com Rust 1.99.1, features padrão e lockfile, em container Debian Bookworm
+rootless sem rede. O executável exige glibc 2.34 ou posterior; `dbm --version`
+e `dbm chain` passaram, este último também no Bookworm. O checksum foi
+conferido novamente após baixar os dois assets da release. Não há assinatura
+nem binários macOS ou Windows. A publicação não altera G11, G12 ou os
+vereditos externos.
+
+O exemplo Flutter do `dbm-sqlite` recebeu um Makefile e testes de integração
+para Android e iOS. No emulador Android 15 API 35 x86_64, duas execuções de
+`make test-integration DEVICE=emulator-5554` passaram dois testes cada:
+upgrade de arquivo anterior, cadastro e reabertura, e recusa de SQL alterado
+preservando os dados. A validação iOS permanece para execução pelo responsável.
+Na ocasião, os arquivos do exemplo ainda estavam locais, sem commit.
+
+Desktop, web, sync e SQLCipher foram pedidos nesta continuação, seguidos de
+React Native/Expo. O `dbm-sqlite` tem um primeiro corte experimental de
+Flutter Linux x86_64: biblioteca pré-compilada, empacotamento CMake e teste da
+ABI no host. O exemplo ganhou runner Linux gerado pelo Flutter 3.50.0; o
+gerador de plugins incluiu `dbm_sqlite` como FFI. `make build-linux` não
+concluiu: não encontrou Ninja nem compilador C++, e o GTK 3 de desenvolvimento
+também não está instalado. O app desktop não foi executado. A feature
+experimental Rust `sqlcipher` do
+`dbm-sqlite` abre arquivos cifrados e oferece `doctor_encrypted` com chave
+fornecida pelo chamador. A API Dart e ABI C opt-in também existem, e Linux
+x86_64 tem um binário experimental selecionado por `DBM_SQLITE_SQLCIPHER`.
+Android inclui variantes separadas para arm64-v8a, armeabi-v7a e x86_64;
+iOS ainda não inclui SQLCipher; não há conversão nem rotação. Os testes
+locais cobrem chave errada, preservação do banco e WAL ativo, upgrade e checksum
+divergente. Não há garantia de imutabilidade dos sidecars de memória compartilhada.
+O `cargo audit` encontrou RUSTSEC-2026-0502 no SQLCipher anterior. Com
+autorização do responsável, `dbm-sqlite` atualizou `rusqlite` de 0.41.1 para
+0.43.0 e `sqlcipher-src` para 420.0.0; a auditoria posterior não encontrou
+vulnerabilidades. A troca altera uma dependência exposta na API e exige
+coordenação com consumidores. Android e Linux x86_64 foram recompilados;
+o XCFramework iOS ainda precisa ser recompilado em macOS. Um cofre gerado
+pelo Jirau passou oito testes contra o checkout atualizado, mas o pin Git dos
+templates distribuídos permanece anterior. O escopo e as limitações estão na
+ADR-006 do `dbm-sqlite`.
+
+No emulador Android 15 x86_64, o teste SQLCipher passou com migração, interface,
+reabertura, diagnóstico, chave incorreta e preservação dos bytes; o teste da
+variante SQLite padrão e os dois testes da jornada anterior também passaram.
+O APK contém as duas bibliotecas nas três ABIs; ARM foi inspecionado, mas não
+executado. SQLCipher permanece experimental e não substitui revisão de segurança.
+O código correspondente foi enviado ao `dbm-sqlite` no commit
+`f46f2f4` da branch `main`.
+
+macOS e Windows, web, sync e React Native/Expo ainda não foram implementados.
+Nenhum desses cortes constitui suporte declarado. A decisão e os limites do
+corte Linux estão na ADR-005 do `dbm-sqlite`.
+
 ## Fora deste acompanhamento
 
-- Publicar no crates.io, ou anexar o binário `dbm` a uma release do GitHub. A tag `v1.1.0` publica só o arquivo-fonte gerado pelo GitHub.
+- Publicar no crates.io.
 - Rodar migration de produção.
-- Expo, React Native, Flutter desktop e Flutter web.
-- Sync offline e SQLCipher.
 - Reescrever G11, G12 ou os vereditos do relatório externo.
